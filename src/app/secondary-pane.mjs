@@ -67,7 +67,7 @@ export class SecondaryPane {
       this.state.visualScrollTop = this.root.scrollTop;
       if (this.richDirty) {
         try {
-          const markdown = preserveProtectedBlocks(item.history.current.markdown, this.editor.getValue());
+          const markdown = preserveProtectedBlocks(item.history.current.markdown, this.editor.getValue()).replace(/\r?\n/g, item.lineEnding);
           changed = item.history.record(markdown, item.history.current.caret, 'right-visual');
         } catch (error) {
           this.richDirty = false; this.refresh({ force: true }); this.onError(error); return;

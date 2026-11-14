@@ -2,16 +2,23 @@ const { app, BrowserWindow, session, Menu, dialog, ipcMain, shell, clipboard } =
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { WorkspaceFiles } = require('./workspace-files.cjs');
+const { RecoveryStore, diskRevision } = require('./file-persistence.cjs');
 const uxVerify = process.argv.includes('--ux-verify');
-const verify = process.argv.includes('--verify') || uxVerify;
+const recoveryPrepare = process.argv.includes('--recovery-prepare');
+const recoveryVerify = process.argv.includes('--recovery-verify');
+const startupVerify = process.argv.includes('--startup-verify');
+const verify = process.argv.includes('--verify') || uxVerify || recoveryPrepare || recoveryVerify || startupVerify;
 app.setName('SuperMarkdown');
 const artifacts = verify && process.env.SUPERMARKDOWN_VERIFY_OUTPUT ? path.resolve(process.env.SUPERMARKDOWN_VERIFY_OUTPUT) :
   app.isPackaged ? path.join(app.getPath('userData'), 'verification') : path.resolve(__dirname, '../../.prototype-artifacts');
 if (!app.isPackaged || verify) app.setPath('userData', path.join(artifacts, verify ? 'verify-profile' : 'profile'));
 app.setAppUserModelId('local.supermarkdown.prototype');
 app.disableHardwareAcceleration();
+const ownsInstance = verify || app.requestSingleInstanceLock();
+if (!ownsInstance) app.quit();
 
 app.whenReady().then(async () => {
+  if (!ownsInstance) return;
   const remoteRequests = [];
   const externalLinks = [];
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
@@ -22,10 +29,18 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   const window = new BrowserWindow({
     width: 1320, height: 940, minWidth: 880, minHeight: 620,
-    show: !verify, backgroundColor: '#f6f7f5', title: 'SuperMarkdown · 编辑验证原型',
+    show: !verify, backgroundColor: '#f6f7f5', title: 'SuperMarkdown',
     webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, backgroundThrottling: false, preload: path.join(__dirname, 'preload.cjs') },
   });
+  app.on('second-instance', () => { if (window.isMinimized()) window.restore(); window.show(); window.focus(); });
   const workspace = new WorkspaceFiles();
+  const recovery = new RecoveryStore(app.getPath('userData'));
+  if (verify && !recoveryVerify) await recovery.write([]);
+  let recovered = [], recoveryError = '';
+  try {
+    recovered = await recovery.read();
+    for (const item of recovered) if (item.file?.path) workspace.openedFiles.set(item.file.key, { ...item.file });
+  } catch (error) { recoveryError = error.message; }
   const fixtureRoot = path.join(artifacts, 'workspace-fixture');
   if (verify) {
     await fs.mkdir(path.join(fixtureRoot, 'nested'), { recursive: true });
@@ -50,7 +65,7 @@ app.whenReady().then(async () => {
       try { return await action(...args); }
       catch (error) {
         const messages = { EACCES: '没有权限访问该文件。', EPERM: '暂时无法访问该文件。', ENOENT: '文件或文件夹已不存在。', ENOTDIR: '请选择一个文件夹。', EEXIST: '同名文件已存在，请换一个文件名。' };
-        return { error: messages[error.code] || error.message };
+        return { error: messages[error.code] || error.message, code: error.code };
       }
     });
   }
@@ -59,6 +74,61 @@ app.whenReady().then(async () => {
       await dialog.showOpenDialog(window, { title: '打开文本文件所在的文件夹', buttonLabel: '打开文件夹', properties: ['openDirectory'] });
     if (result.canceled || !result.filePaths.length) return null;
     return workspace.openFolder(result.filePaths[0]);
+  });
+  handle('application:startup', () => ({ verify: verify && !startupVerify, drafts: recovered, recoveryError }));
+  handle('workspace:open-file', async () => {
+    const result = verify ? { canceled: false, filePaths: [path.join(fixtureRoot, 'README.MD')] } :
+      await dialog.showOpenDialog(window, { title: '打开文本文件', properties: ['openFile'], filters: [{ name: '文本文件', extensions: ['md', 'txt', '*'] }] });
+    return result.canceled ? null : workspace.readAbsolute(result.filePaths[0]);
+  });
+  let testDelay = 0, cancelNextSave = false, closeApprovals = 0;
+  handle('workspace:save', async request => {
+    if (verify && testDelay) await new Promise(resolve => setTimeout(resolve, testDelay));
+    return workspace.save(request.key, request.content, request.revision);
+  });
+  handle('workspace:inspect', key => workspace.inspect(key));
+  let saveDialogNumber = 0;
+  handle('workspace:save-as', async ({ name, content, key, openKeys = [] }) => {
+    if (verify && cancelNextSave) { cancelNextSave = false; return null; }
+    const current = key ? workspace.knownFile(key) : null;
+    const result = verify ? { canceled: false, filePath: path.join(fixtureRoot, `另存-${++saveDialogNumber}-${path.basename(name)}`) } :
+      await dialog.showSaveDialog(window, { title: '另存为', defaultPath: current?.path || name,
+        filters: [{ name: '文本文件', extensions: [path.extname(name).slice(1) || 'md'] }, { name: '所有文件', extensions: ['*'] }] });
+    if (result.canceled || !result.filePath) return null;
+    const target = path.join(await fs.realpath(path.dirname(result.filePath)), path.basename(result.filePath));
+    const normalized = value => process.platform === 'win32' ? value.toLowerCase() : value;
+    if (openKeys.some(openKey => openKey !== key && normalized(workspace.knownFile(openKey).path) === normalized(target))) {
+      throw new Error('目标文件已在其他标签页打开，请选择其他位置。');
+    }
+    const before = await diskRevision(target);
+    return workspace.saveAs(target, content, before.revision);
+  });
+  handle('recovery:write', documents => recovery.write(documents));
+  handle('recovery:read', () => recovery.read());
+  let closingWindow = false;
+  window.on('close', event => {
+    if (closingWindow) return;
+    event.preventDefault(); window.webContents.send('application:request-close');
+  });
+  handle('application:close-approved', () => {
+    closeApprovals++;
+    if (!verify) { closingWindow = true; window.close(); }
+    return { ok: true };
+  });
+  if (verify) handle('testing:files', async ({ action, key, content, delay }) => {
+    if (action === 'delay') { testDelay = delay; return { ok: true }; }
+    if (action === 'cancel-save') { cancelNextSave = true; return { ok: true }; }
+    if (action === 'close-window') { window.close(); return { ok: true }; }
+    if (action === 'close-count') return { count: closeApprovals };
+    const target = workspace.knownFile(key).path;
+    const relative = path.relative(fixtureRoot, target);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('仅允许修改验证样本。');
+    if (action === 'write') await fs.writeFile(target, content);
+    else if (action === 'delete') await fs.unlink(target);
+    else if (action === 'readonly') await fs.chmod(target, 0o444);
+    else if (action === 'writable') await fs.chmod(target, 0o666);
+    else throw new Error('未知验证操作。');
+    return { ok: true };
   });
   handle('workspace:list', id => workspace.list(id));
   handle('workspace:read', id => workspace.read(id));
@@ -96,6 +166,26 @@ app.whenReady().then(async () => {
   });
   await window.loadFile(path.join(__dirname, 'index.html'));
   if (uxVerify) window.setContentSize(1920, 1080);
+  if (startupVerify) {
+    try {
+      const result = await window.webContents.executeJavaScript('window.prototypeReady.then(() => window.startupSmokeCheck())');
+      console.log(JSON.stringify(result));
+      app.exit(result.checks.every(item => item.passed) ? 0 : 1);
+    } catch (error) { console.error(error); app.exit(1); }
+    return;
+  }
+  if (recoveryPrepare || recoveryVerify) {
+    try {
+      const result = await window.webContents.executeJavaScript(`window.prototypeReady.then(() => window.${recoveryPrepare ? 'prepareRecoveryCheck' : 'verifyRecoveryCheck'}())`);
+      if (recoveryVerify) {
+        await fs.writeFile(path.join(artifacts, 'recovery-report.json'), JSON.stringify(result, null, 2));
+        console.log(JSON.stringify(result));
+      }
+      // 直接结束进程，刻意绕过正常关闭和草稿清理，下一次启动验证恢复路径。
+      app.exit(result.checks?.some(item => !item.passed) ? 1 : 0);
+    } catch (error) { console.error(error); app.exit(1); }
+    return;
+  }
   if (verify) {
     const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('原型载入超时')), 30000));
     try {
@@ -115,6 +205,10 @@ app.whenReady().then(async () => {
         report.checks.push(...layoutChecks.checks);
       }
       report.checks.push({ name: '文件浏览和内存编辑未改写磁盘原文件', passed: (await fs.readFile(path.join(fixtureRoot, 'notes.txt'), 'utf8')) === '# 纯文本标题\r\n**不是加粗**\r\n' });
+      if (uxVerify) {
+        const storage = await window.webContents.executeJavaScript('window.runStorageChecks()');
+        report.checks.push(...storage.checks);
+      }
       if (remoteRequests.length) throw new Error('原型请求了远程资源：' + remoteRequests.join(', '));
       await fs.mkdir(artifacts, { recursive: true });
       await fs.writeFile(path.join(artifacts, 'editor.png'), (await window.webContents.capturePage()).toPNG());

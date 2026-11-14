@@ -5,7 +5,7 @@ module.exports = {
   electronDist: 'node_modules/electron/dist',
   asar: true,
   npmRebuild: false,
-  files: ['experiments/editor-spike/**/*', 'README.md', 'docs/releases/0.1.0.md'],
+  files: ['src/app/**/*', 'README.md', 'docs/releases/*.md'],
   win: {
     target: [{ target: 'nsis', arch: ['x64'] }, { target: 'zip', arch: ['x64'] }],
     artifactName: 'SuperMarkdown-${version}-windows-${arch}.${ext}',

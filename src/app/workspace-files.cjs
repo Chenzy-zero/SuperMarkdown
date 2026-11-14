@@ -1,6 +1,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { pathToFileURL, fileURLToPath } = require('node:url');
+const { revisionOf, encodeText, writeAtomic, diskRevision } = require('./file-persistence.cjs');
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
@@ -17,7 +18,8 @@ function decodeText(bytes, partial = false) {
       const text = new TextDecoder(encoding, { fatal: true }).decode(bytes, { stream: partial });
       const controls = text.match(/[\u0000-\u0008\u000B\u000E-\u001F\u007F]/g)?.length ?? 0;
       if (text.includes('\0') || controls / Math.max(text.length, 1) > 0.02) return null;
-      return { content: text, encoding };
+      const bom = encoding === 'utf-8' ? bytes.subarray(0, 3).equals(Buffer.from([239,187,191])) : encoding.startsWith('utf-16');
+      return { content: text, encoding, bom };
     } catch { /* 尝试下一个已支持的文本编码。 */ }
   }
   return null;
@@ -102,6 +104,32 @@ class WorkspaceFiles {
     return file;
   }
 
+  async save(key, content, revision) {
+    const file = this.knownFile(key);
+    const written = await writeAtomic(file.path, encodeText(content, file.encoding, file.bom), revision);
+    return this.verifySaved(file.path, file.root, written);
+  }
+
+  async saveAs(filePath, content, expectedRevision) {
+    const parent = await fs.realpath(path.dirname(filePath));
+    const target = path.join(parent, path.basename(filePath));
+    const written = await writeAtomic(target, encodeText(content), expectedRevision);
+    return this.verifySaved(target, this.root, written);
+  }
+
+  async verifySaved(target, root, writtenRevision) {
+    const file = await this.readAbsolute(target, root);
+    if (file.revision !== writtenRevision) throw Object.assign(new Error('保存后文件又被其他程序修改，请重新载入或另存为。'), { code: 'FILE_CONFLICT' });
+    return file;
+  }
+
+  async inspect(key) {
+    const file = this.knownFile(key);
+    const disk = await diskRevision(file.path);
+    if (disk.revision === null) return { missing: true };
+    return this.readAbsolute(file.path, file.root);
+  }
+
   describeLink(href, fromKey) {
     if (typeof href !== 'string' || !href.trim() || href.includes('\0')) throw new Error('链接地址无效。');
     const raw = href.trim();
@@ -129,15 +157,16 @@ class WorkspaceFiles {
       const stat = await handle.stat();
       if (!stat.isFile()) throw new Error('请选择一个文本文件。');
       if (stat.size > MAX_FILE_BYTES) throw new Error('此原型暂支持打开 20 MB 以内的文本文件。');
-      const decoded = decodeText(await handle.readFile());
+      const bytes = await handle.readFile();
+      const decoded = decodeText(bytes);
       if (!decoded) throw new Error('此文件不是当前可读取的文本文件。');
       const result = {
-        ...decoded, id: root ? path.relative(root, fullPath).split(path.sep).join('/') : null, path: fullPath, root,
+        ...decoded, revision: revisionOf(bytes), id: root ? path.relative(root, fullPath).split(path.sep).join('/') : null, path: fullPath, root,
         key: process.platform === 'win32' ? fullPath.toLowerCase() : fullPath,
         name: path.basename(fullPath),
         kind: /\.(md|markdown|mdown|mkd)$/i.test(fullPath) ? 'markdown' : 'text',
       };
-      this.openedFiles.set(result.key, { path: fullPath });
+      this.openedFiles.set(result.key, { path: fullPath, encoding: decoded.encoding, bom: decoded.bom, root });
       return result;
     } finally { await handle.close(); }
   }

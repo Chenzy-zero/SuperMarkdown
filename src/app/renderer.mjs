@@ -7,23 +7,27 @@ import { SecondaryPane } from './secondary-pane.mjs';
 import { bindToolbarTooltip } from './toolbar-tooltip.mjs';
 import { runLayoutChecks } from './layout-checks.mjs';
 import { bindPaneDivider } from './pane-divider.mjs';
+import { runStorageChecks } from './storage-checks.mjs';
 window.runPrototypeUXChecks = runUXChecks;
 window.runPrototypeWorkspaceChecks = runWorkspaceChecks;
 window.runPrototypeLayoutChecks = runLayoutChecks;
+window.runStorageChecks = () => runStorageChecks({ current: focusedDoc, documents: () => documents, isDirty,
+  setLayout, saveDocument, closeDocuments, openWorkspaceFile, flushRecovery, restoreDrafts, scanExternalFiles });
 
 const $ = id => document.getElementById(id);
+const startup = unwrap(await window.workspaceFiles.startup());
 function createDocument(name, content, kind = 'markdown', key = `demo:${name}`, file = null) {
   return {
     name, kind, key, file, mode: kind === 'markdown' ? 'visual' : 'text',
-    history: new DocumentHistory(content),
+    history: new DocumentHistory(content), savedText: content,
     lineEnding: content.includes('\r\n') && !/(?<!\r)\n/.test(content) ? '\r\n' : '\n',
   };
 }
-const documents = [
+const documents = startup.verify ? [
   createDocument('开始写作.md', sample),
   createDocument('内容保留样本.md', compatibility),
   createDocument('长文样本.md', suggestedScale),
-];
+] : [];
 let activeIndex = 0;
 let mode = 'visual';
 let richDirty = false;
@@ -38,6 +42,10 @@ let linkPoint = null;
 let linkSequence = 0;
 let closingTabs = false;
 let resolveCloseDialog = null;
+let resolveConflict = null;
+let recoveryReady = !startup.drafts.length && !startup.recoveryError;
+let recoveryTimer = null, lastRecovery = null, recoveryFailure = startup.recoveryError || '';
+let scanning = false;
 let secondary = null;
 let activePane = 'left';
 let layout = 'single';
@@ -52,7 +60,7 @@ let resolveReady;
 window.prototypeReady = new Promise(resolve => { resolveReady = resolve; });
 
 function unwrap(result) {
-  if (result?.error) throw new Error(result.error);
+  if (result?.error) throw Object.assign(new Error(result.error), { code: result.code });
   return result;
 }
 
@@ -242,37 +250,165 @@ async function activateLink(request, side = 'left') {
   } catch (error) { showError(error); }
 }
 
-function isDirty(item) { return item.history.current.markdown !== item.history.entries[0].markdown; }
+function isDirty(item) { return item.history.current.markdown !== item.savedText; }
 
-function finishCloseDialog(discard) {
+function recoverySnapshot() {
+  return documents.filter(isDirty).map(item => ({ key: item.key, name: item.name, kind: item.kind, file: item.file,
+    savedText: item.savedText, content: item.history.current.markdown, mode: item.mode, lineEnding: item.lineEnding }));
+}
+async function flushRecovery() {
+  if (!recoveryReady) return;
+  capture(); secondary?.capture(); clearTimeout(recoveryTimer); recoveryTimer = null;
+  const entries = recoverySnapshot(), serialized = JSON.stringify(entries);
+  if (serialized === lastRecovery) return;
+  try { unwrap(await window.workspaceFiles.writeRecovery(entries)); lastRecovery = serialized; recoveryFailure = ''; }
+  catch (error) { recoveryFailure = `恢复草稿写入失败：${error.message}`; showError(error); throw error; }
+}
+function scheduleRecovery() {
+  if (!recoveryReady || recoveryTimer !== null) return;
+  recoveryTimer = setTimeout(() => { recoveryTimer = null; flushRecovery().catch(() => {}); }, 400);
+}
+function newDocument() {
+  capture(); secondary?.capture();
+  const item = createDocument('未命名.md', '', 'markdown', `untitled:${crypto.randomUUID()}`);
+  documents.push(item); selectDocument(documents.length - 1, { forceLeft: true });
+}
+async function openFile() {
+  try { const file = unwrap(await window.workspaceFiles.openFile()); if (file) acceptFile(file); } catch (error) { showError(error); }
+}
+function askConflict(item) {
+  if (resolveConflict || document.querySelector('dialog[open]')) return Promise.resolve('cancel');
+  $('conflict-message').textContent = `${item.name} 已被其他程序修改。当前编辑内容仍保留，可重新载入磁盘版本或另存为。`;
+  return new Promise(resolve => { resolveConflict = resolve; $('file-conflict').showModal(); });
+}
+function finishConflict(action) { const resolve = resolveConflict; resolveConflict = null; $('file-conflict').close(); resolve?.(action); }
+function applyDisk(item, file) {
+  item.file = file; item.savedText = file.content; item.history = new DocumentHistory(file.content);
+  item.lineEnding = file.content.includes('\r\n') && !/(?<!\r)\n/.test(file.content) ? '\r\n' : '\n';
+  item.externalChanged = false; item.missing = false;
+  item.saveError = '';
+  if (item === doc()) render({ focus: false }); else { secondary?.refresh({ force: true }); updateUI(); }
+}
+async function reloadDocument(item) {
+  const file = unwrap(await window.workspaceFiles.inspect(item.file.key));
+  if (file.missing) { item.missing = true; throw new Error('原文件已不存在，当前内容仍保留，请另存为。'); }
+  applyDisk(item, file); await flushRecovery();
+}
+async function saveDocument(item = focusedDoc(), saveAs = false) {
+  if (!item) return false;
+  if (item.saving) { await item.saving; return isDirty(item) ? saveDocument(item, saveAs) : true; }
+  capture(); secondary?.capture();
+  const snapshot = item.history.current.markdown;
+  item.saveError = '';
+  const action = (async () => {
+    try {
+      const request = { name: item.name, content: snapshot, key: item.file?.key,
+        revision: item.file?.revision, openKeys: documents.flatMap(entry => entry.file ? [entry.file.key] : []) };
+      const result = unwrap(await (saveAs || !item.file ? window.workspaceFiles.saveAs(request) : window.workspaceFiles.save(request)));
+      if (!result) return false;
+      const oldKey = item.key, oldKind = item.kind;
+      item.key = result.key; item.file = result; item.name = result.name; item.savedText = snapshot;
+      item.kind = result.kind; item.externalChanged = false; item.missing = false; item.history.closeGroup();
+      if (secondary?.key === oldKey) {
+        const state = secondary.states.get(oldKey); if (state) secondary.states.set(item.key, state);
+        secondary.key = item.key;
+      }
+      if (item.kind === 'text') { item.mode = 'text'; if (item === doc()) mode = 'text'; }
+      if (oldKind !== item.kind) {
+        item.mode = item.kind === 'markdown' ? 'source' : 'text';
+        if (item === doc()) mode = item.mode;
+        if (secondary?.key === item.key) secondary.mode = item.mode;
+        if (layout === 'sync') { layout = 'single'; $('layout-mode').value = layout; $('editors').dataset.layout = layout; secondary.bind(null); activePane = 'left'; }
+        render({ focus: false });
+      }
+      if (rootFolder) await refreshFolder();
+      updateUI(); await flushRecovery(); $('status').textContent = `已保存 · ${result.path}`;
+      return true;
+    } catch (error) {
+      if (error.code === 'FILE_MISSING') { item.missing = true; return 'missing'; }
+      if (error.code === 'FILE_CONFLICT') { item.externalChanged = true; return 'conflict'; }
+      item.saveError = error.message; showError(error); return false;
+    }
+  })();
+  item.saving = action; updateUI();
+  let result;
+  try { result = await action; } finally { item.saving = null; updateUI(); }
+  if (result === 'missing') return saveDocument(item, true);
+  if (result === 'conflict') {
+    const choice = await askConflict(item);
+    if (choice === 'save-as') return saveDocument(item, true);
+    if (choice === 'reload') { try { await reloadDocument(item); } catch (error) { showError(error); } }
+    return false;
+  }
+  return result;
+}
+
+async function scanExternalFiles(prompt = false) {
+  if (scanning || composing || document.querySelector('dialog[open]')) return;
+  scanning = true; capture(); secondary?.capture();
+  try {
+    for (const item of documents.filter(entry => entry.file && !entry.saving)) {
+      const file = unwrap(await window.workspaceFiles.inspect(item.file.key));
+      if (!documents.includes(item)) continue;
+      if (file.missing) { item.missing = true; continue; }
+      if (file.revision === item.file.revision) continue;
+      if (!isDirty(item)) applyDisk(item, file);
+      else {
+        item.externalChanged = true;
+        if (prompt && item.notifiedRevision !== file.revision) {
+          item.notifiedRevision = file.revision;
+          const choice = await askConflict(item);
+          if (choice === 'save-as') await saveDocument(item, true);
+          else if (choice === 'reload') await reloadDocument(item);
+        }
+      }
+    }
+    updateUI();
+  } catch (error) { showError(error); } finally { scanning = false; }
+}
+
+function restoreDrafts(entries) {
+  for (const entry of entries) {
+    if (documents.some(item => item.key === entry.key)) continue;
+    const item = createDocument(entry.name, entry.savedText, entry.kind, entry.key, entry.file);
+    item.history.record(entry.content); item.mode = entry.mode; item.lineEnding = entry.lineEnding;
+    documents.push(item);
+  }
+  recoveryReady = true;
+  if (documents.length) selectDocument(documents.length - 1, { forceLeft: true });
+  scheduleRecovery();
+}
+
+function finishCloseDialog(action) {
   const resolve = resolveCloseDialog;
   resolveCloseDialog = null;
-  $('close-confirm').close(discard ? 'discard' : 'cancel');
-  resolve?.(discard);
+  $('close-confirm').close(action);
+  resolve?.(action);
 }
 
 async function closeDocuments(keys) {
-  if (closingTabs) return;
+  if (closingTabs) return false;
   capture(); secondary?.capture();
   const requested = new Set(keys);
   const targets = documents.filter(item => requested.has(item.key));
-  if (!targets.length) return;
+  if (!targets.length) return true;
   closingTabs = true;
   try {
     const dirty = targets.filter(isDirty);
     if (dirty.length) {
-      $('close-message').textContent = `${dirty.map(item => item.name).join('、')} 有未保存的修改。`;
-      const confirmed = await new Promise(resolve => {
+      $('close-message').textContent = `${dirty.map(item => item.name).join('、')} 有未保存的修改，是否保存后关闭？`;
+      const choice = await new Promise(resolve => {
         const dialog = $('close-confirm');
         resolveCloseDialog = resolve;
         dialog.returnValue = ''; dialog.showModal();
       });
-      if (!confirmed) return;
+      if (choice === 'cancel') return false;
+      if (choice === 'save') for (const item of dirty) if (!await saveDocument(item) || isDirty(item)) return false;
     }
     openRequest++;
     const activeKey = doc()?.key;
     const previousIndex = activeIndex;
-    for (let i = documents.length - 1; i >= 0; i--) if (requested.has(documents[i].key)) documents.splice(i, 1);
+    for (let i = documents.length - 1; i >= 0; i--) if (targets.includes(documents[i])) documents.splice(i, 1);
     const surviving = documents.findIndex(item => item.key === activeKey);
     activeIndex = surviving >= 0 ? surviving : Math.min(previousIndex, documents.length - 1);
     if (secondary?.key && !secondary.document) { secondary.bind(null); activePane = 'left'; }
@@ -280,7 +416,7 @@ async function closeDocuments(keys) {
       layout = 'single'; activePane = 'left'; secondary?.bind(null);
       $('layout-mode').value = layout; $('editors').dataset.layout = layout;
     }
-    mode = doc()?.mode || 'visual'; render();
+    mode = doc()?.mode || 'visual'; render(); await flushRecovery(); return true;
   } finally { closingTabs = false; }
 }
 
@@ -457,7 +593,7 @@ function capture() {
     doc().visualScrollTop = richRoot().scrollTop;
     if (richDirty) {
       try {
-        const markdown = preserveProtectedBlocks(doc().history.current.markdown, engine.getValue());
+        const markdown = preserveProtectedBlocks(doc().history.current.markdown, engine.getValue()).replace(/\r?\n/g, doc().lineEnding);
         doc().history.record(markdown, richCaretToMarkdown(), 'visual');
       } catch (error) {
         richDirty = false;
@@ -480,14 +616,18 @@ function updateUI() {
   $('mode-controls').hidden = plainText || !active || layout === 'sync';
   $('text-mode-label').hidden = !plainText;
   $('mode-shortcut').hidden = plainText || !active || layout === 'sync';
-  $('editor-title').textContent = plainText ? '纯文本文件' : '验证直接写作与源码切换';
-  $('editor-hint').textContent = plainText ? '直接查看或编辑文本，语法符号保持原样。' : '试着编辑正文、操作表格，再切换模式，检查内容与撤销是否连贯。';
+  $('editor-title').textContent = active?.name || '开始写作';
+  $('editor-hint').textContent = active?.file?.path || '新建文档，或打开本地文件和文件夹。';
   $('visual-mode').setAttribute('aria-pressed', String(viewMode === 'visual'));
   $('source-mode').setAttribute('aria-pressed', String(viewMode === 'source'));
   $('undo').disabled = !active?.history.canUndo;
   $('redo').disabled = !active?.history.canRedo;
   const modeLabel = plainText ? '纯文本' : viewMode === 'visual' ? '可视编辑' : '源码模式';
-  $('status').textContent = active ? `${modeLabel}${active.file ? ` · ${active.file.encoding}` : ''} · 修改仅暂存本次窗口` : '没有打开的文档';
+  $('save-file').disabled = !active || Boolean(active.saving);
+  $('save-as').disabled = !active || Boolean(active.saving);
+  const stateLabel = active?.saving ? '正在保存…' : active?.saveError ? `保存失败：${active.saveError}` : active?.missing ? '原文件已不存在，请另存为' : active?.externalChanged ? '磁盘文件已变化，保存前需要处理' : active && isDirty(active) ? '未保存' : active && !active.file ? '未命名' : '已保存';
+  $('status').textContent = recoveryFailure || (active ? `${modeLabel}${active.file ? ` · ${active.file.encoding}` : ''} · ${stateLabel}` : '没有打开的文档');
+  document.title = active ? `${isDirty(active) ? '● ' : ''}${active.name} — SuperMarkdown` : 'SuperMarkdown';
   source.setAttribute('aria-label', doc()?.kind === 'text' ? '纯文本内容' : 'Markdown 源码');
   source.classList.toggle('markdown-source', doc()?.kind === 'markdown');
   $('left-pane-name').textContent = doc() ? `左侧 · ${doc().name}` : '左侧';
@@ -546,6 +686,7 @@ function updateUI() {
     note.textContent = '纯文本文件不提供 Markdown 标题大纲。';
     $('outline').append(note);
   }
+  scheduleRecovery();
 }
 
 function render({ focus = true } = {}) {
@@ -619,13 +760,19 @@ function redo() { if (activePane === 'right') secondary?.undoRedo('redo'); else 
 document.addEventListener('keydown', event => {
   if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'w') {
     event.preventDefault(); event.stopImmediatePropagation();
-    if (!$('close-confirm').open && !$('new-file-dialog').open && !event.isComposing && focusedDoc()) closeDocuments([focusedDoc().key]);
+    if (!document.querySelector('dialog[open]') && !event.isComposing && focusedDoc()) closeDocuments([focusedDoc().key]);
     return;
   }
-  if ($('close-confirm').open || $('new-file-dialog').open) return;
+  if (document.querySelector('dialog[open]')) return;
   if (event.key === 'Escape') { $('tab-menu').hidden = true; $('file-menu').hidden = true; clearLinkPreview(); }
   if (!(event.ctrlKey || event.metaKey) || event.isComposing) return;
   const key = event.key.toLowerCase();
+  if (['s', 'o', 'n'].includes(key)) {
+    event.preventDefault(); event.stopImmediatePropagation();
+    if (key === 's') saveDocument(focusedDoc(), event.shiftKey);
+    else if (key === 'o') openFile(); else newDocument();
+    return;
+  }
   if (key === 'z' || key === 'y') {
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -648,9 +795,33 @@ $('visual-mode').onclick = () => setMode('visual');
 $('source-mode').onclick = () => setMode('source');
 $('undo').onclick = undo;
 $('redo').onclick = redo;
-$('close-cancel').onclick = () => finishCloseDialog(false);
-$('close-discard').onclick = () => finishCloseDialog(true);
-$('close-confirm').addEventListener('cancel', event => { event.preventDefault(); finishCloseDialog(false); });
+$('close-cancel').onclick = () => finishCloseDialog('cancel');
+$('close-discard').onclick = () => finishCloseDialog('discard');
+$('close-save').onclick = () => finishCloseDialog('save');
+$('close-confirm').addEventListener('cancel', event => { event.preventDefault(); finishCloseDialog('cancel'); });
+for (const id of ['save-file', 'save-as', 'open-file', 'new-document']) $(id).addEventListener('pointerdown', event => { capture(); secondary?.capture(); event.preventDefault(); });
+$('save-file').onclick = () => saveDocument();
+$('save-as').onclick = () => saveDocument(focusedDoc(), true);
+$('open-file').onclick = openFile;
+$('new-document').onclick = newDocument;
+$('conflict-cancel').onclick = () => finishConflict('cancel');
+$('conflict-reload').onclick = () => finishConflict('reload');
+$('conflict-save-as').onclick = () => finishConflict('save-as');
+$('file-conflict').addEventListener('cancel', event => { event.preventDefault(); finishConflict('cancel'); });
+$('recovery-restore').onclick = () => { $('recovery-dialog').close(); restoreDrafts(startup.drafts); };
+$('recovery-discard').onclick = () => { $('recovery-dialog').close(); recoveryReady = true; flushRecovery().catch(showError); };
+$('recovery-dialog').addEventListener('cancel', event => event.preventDefault());
+$('examples-section').hidden = !startup.verify;
+window.workspaceFiles.onCloseRequested(async () => {
+  if (document.querySelector('dialog[open]') || closingTabs) return;
+  try {
+    if (await closeDocuments(documents.map(item => item.key))) { await flushRecovery(); unwrap(await window.workspaceFiles.approveClose()); }
+  } catch (error) { showError(error); }
+});
+if (!startup.verify) {
+  window.addEventListener('focus', () => scanExternalFiles(true));
+  setInterval(() => { if (!document.hidden) scanExternalFiles(); }, 2500);
+}
 document.addEventListener('pointerdown', event => { for (const id of ['tab-menu', 'file-menu']) if (!$(id).contains(event.target)) $(id).hidden = true; });
 $('tab-menu').addEventListener('keydown', event => {
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
@@ -769,9 +940,44 @@ engine = new Vditor('rich', {
       onState: updateUI, onError: showError,
       onReady: (root, viewEngine) => bindEditorControls(root, viewEngine, () => secondary.document, 'right'),
     });
-    secondary.ready.then(resolveReady);
+    secondary.ready.then(() => {
+      if (startup.drafts.length) {
+        $('recovery-message').textContent = `上次留下了 ${startup.drafts.length} 篇未保存的文档，是否恢复？`;
+        $('recovery-dialog').showModal();
+      } else if (startup.recoveryError) showError(new Error(startup.recoveryError));
+      resolveReady();
+    });
   },
 });
+
+window.startupSmokeCheck = async () => {
+  const checks = [], check = (name, passed) => checks.push({ name, passed: Boolean(passed) });
+  check('正常启动显示空状态并隐藏验证示例', documents.length === 0 && !$('empty-state').hidden && $('examples-section').hidden);
+  newDocument(); setMode('source');
+  source.value = '# 正常启动写作\n'; source.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  check('正常启动路径可新建并保存文档', await saveDocument() && !isDirty(doc()));
+  check('保存结果实际可重新打开', (await window.workspaceFiles.inspect(doc().file.key)).content === '# 正常启动写作\n');
+  return { checks };
+};
+
+window.prepareRecoveryCheck = async () => {
+  await chooseFolder(); await openWorkspaceFile('README.MD'); setMode('source');
+  source.value += '\n已命名文档的跨进程草稿\n'; source.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  newDocument(); setMode('source');
+  source.value = '# 未命名跨进程恢复\n'; source.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  await flushRecovery(); return { prepared: true };
+};
+window.verifyRecoveryCheck = async () => {
+  const checks = [], check = (name, passed) => checks.push({ name, passed: Boolean(passed) });
+  check('重新启动进程后主动提示恢复未保存文档', $('recovery-dialog').open && startup.drafts.length === 2);
+  $('recovery-restore').click();
+  const named = documents.find(item => item.history.current.markdown.includes('已命名文档的跨进程草稿'));
+  const untitled = documents.find(item => item.history.current.markdown.includes('未命名跨进程恢复'));
+  check('恢复有名和未命名文档，保留未保存状态', named && untitled && isDirty(named) && isDirty(untitled));
+  check('恢复不会擅自改写原磁盘文件', named && !(await window.workspaceFiles.inspect(named.file.key)).content.includes('跨进程草稿'));
+  check('跨进程恢复后的两篇文档都能继续保存', named && untitled && await saveDocument(named) && await saveDocument(untitled));
+  return { checks };
+};
 
 window.runPrototypeChecks = async () => {
   const checks = [];

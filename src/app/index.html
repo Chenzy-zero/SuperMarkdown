@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self' data:; object-src 'none'; base-uri 'none'">
-  <title>SuperMarkdown · 编辑验证原型</title>
+  <title>SuperMarkdown</title>
   <link rel="stylesheet" href="../../node_modules/vditor/dist/index.css">
   <link rel="stylesheet" href="style.css">
   <script defer src="../../node_modules/vditor/dist/index.min.js"></script>
@@ -13,7 +13,8 @@
 </head>
 <body>
   <header class="app-header">
-    <div class="brand"><span class="logo">M</span><strong>SuperMarkdown</strong><span class="badge">编辑验证原型</span></div>
+    <div class="brand"><span class="logo">M</span><strong>SuperMarkdown</strong></div>
+    <div class="file-actions"><button id="new-document" title="新建 Ctrl+N">新建</button><button id="open-file" title="打开 Ctrl+O">打开</button><button id="save-file" title="保存 Ctrl+S">保存</button><button id="save-as" title="另存为 Ctrl+Shift+S">另存为</button></div>
     <div id="mode-controls" class="mode-switch" aria-label="编辑模式">
       <button id="visual-mode" aria-pressed="true">可视编辑</button>
       <button id="source-mode" aria-pressed="false">源码</button>
@@ -32,11 +33,11 @@
         <details id="examples-section" open><summary>内置示例</summary><nav id="examples" aria-label="示例文档"></nav></details>
       </div>
       <nav id="outline" aria-label="文档大纲" hidden></nav>
-      <p class="sidebar-note">支持读取本地文件。修改暂存于<br>本次窗口，关闭前请自行保留。</p>
+      <p class="sidebar-note">Ctrl+S 保存 · Ctrl+Shift+S 另存为<br>未保存内容自动保留恢复草稿。</p>
     </aside>
     <main>
       <div id="tabs" class="document-tabs" aria-label="打开的文档"></div>
-      <section class="intro"><strong id="editor-title">验证直接写作与源码切换</strong><span id="editor-hint">试着编辑正文、操作表格，再切换模式，检查内容与撤销是否连贯。</span></section>
+      <section class="intro"><strong id="editor-title">开始写作</strong><span id="editor-hint">新建文档，或打开本地文件和文件夹。</span></section>
       <div class="actions"><button id="undo">↶ 撤销</button><button id="redo">↷ 重做</button><span>Ctrl+Z / Ctrl+Y</span><span id="mode-shortcut" class="shortcut">切换模式 Ctrl+Shift+M</span></div>
       <div class="layout-bar"><label for="layout-mode">显示布局</label><select id="layout-mode"><option value="single">单文件</option><option value="files">双文件并排</option><option value="sync">预览 + 源码同步</option></select><span id="layout-hint"></span></div>
       <div class="editor-area" id="editors" data-layout="single">
@@ -55,8 +56,9 @@
   <dialog id="close-confirm" aria-labelledby="close-title">
     <h3 id="close-title">关闭未保存的文档？</h3>
     <p id="close-message"></p>
-    <p>当前原型的修改尚未写回文件。需要保留时，请先返回文档复制内容。</p>
-    <div class="dialog-actions"><button id="close-cancel" autofocus>返回文档</button><button id="close-discard">放弃修改并关闭</button></div>
+    <div class="dialog-actions"><button id="close-cancel">取消</button><button id="close-discard">不保存</button><button id="close-save" autofocus>保存</button></div>
   </dialog>
+  <dialog id="file-conflict" aria-labelledby="conflict-title"><h3 id="conflict-title">磁盘文件已变化</h3><p id="conflict-message"></p><div class="dialog-actions"><button id="conflict-cancel">取消</button><button id="conflict-reload">重新载入</button><button id="conflict-save-as">另存为</button></div></dialog>
+  <dialog id="recovery-dialog" aria-labelledby="recovery-title"><h3 id="recovery-title">恢复未保存内容</h3><p id="recovery-message"></p><div class="dialog-actions"><button id="recovery-discard">放弃草稿</button><button id="recovery-restore" autofocus>恢复</button></div></dialog>
 </body>
 </html>
