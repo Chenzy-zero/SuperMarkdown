@@ -1,0 +1,901 @@
+import { DocumentHistory } from './history.mjs';
+import { sample, compatibility, suggestedScale } from './samples.mjs';
+import { preserveProtectedBlocks, protectedBlocks } from './protected-blocks.mjs';
+import { runUXChecks } from './ux-checks.mjs';
+import { runWorkspaceChecks } from './workspace-checks.mjs';
+import { SecondaryPane } from './secondary-pane.mjs';
+import { bindToolbarTooltip } from './toolbar-tooltip.mjs';
+import { runLayoutChecks } from './layout-checks.mjs';
+import { bindPaneDivider } from './pane-divider.mjs';
+window.runPrototypeUXChecks = runUXChecks;
+window.runPrototypeWorkspaceChecks = runWorkspaceChecks;
+window.runPrototypeLayoutChecks = runLayoutChecks;
+
+const $ = id => document.getElementById(id);
+function createDocument(name, content, kind = 'markdown', key = `demo:${name}`, file = null) {
+  return {
+    name, kind, key, file, mode: kind === 'markdown' ? 'visual' : 'text',
+    history: new DocumentHistory(content),
+    lineEnding: content.includes('\r\n') && !/(?<!\r)\n/.test(content) ? '\r\n' : '\n',
+  };
+}
+const documents = [
+  createDocument('开始写作.md', sample),
+  createDocument('内容保留样本.md', compatibility),
+  createDocument('长文样本.md', suggestedScale),
+];
+let activeIndex = 0;
+let mode = 'visual';
+let richDirty = false;
+let sourceDirty = false;
+let rootFolder = null;
+let openRequest = 0;
+let loading = false;
+let composing = false;
+let engine;
+let linkAnchor = null;
+let linkPoint = null;
+let linkSequence = 0;
+let closingTabs = false;
+let resolveCloseDialog = null;
+let secondary = null;
+let activePane = 'left';
+let layout = 'single';
+let newFileDirectory = '';
+let newFileSide = 'left';
+const source = $('source');
+const doc = () => documents[activeIndex];
+const focusedDoc = () => activePane === 'right' ? secondary?.document : doc();
+const richRoot = () => document.querySelector('.vditor-wysiwyg > .vditor-reset');
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+let resolveReady;
+window.prototypeReady = new Promise(resolve => { resolveReady = resolve; });
+
+function unwrap(result) {
+  if (result?.error) throw new Error(result.error);
+  return result;
+}
+
+function showError(error) { $('status').textContent = error.message || '暂时无法打开该文件。'; }
+
+function focusPane(side) {
+  if (side === activePane) return;
+  if (activePane === 'right') secondary?.capture(); else capture();
+  activePane = side;
+  focusedDoc()?.history.closeGroup();
+  updateUI();
+}
+
+function syncSecondary() {
+  if (!secondary) return;
+  if (layout === 'sync') {
+    const key = doc()?.key || null;
+    if (secondary.key !== key || secondary.mode !== 'source') secondary.bind(key, 'source');
+    else secondary.refresh();
+  } else if (layout === 'files') secondary.refresh();
+}
+
+function setLayout(next, { autoPick = true } = {}) {
+  capture(); secondary?.capture();
+  const selected = focusedDoc() || doc();
+  if (next === 'sync' && selected?.kind !== 'markdown') {
+    $('layout-mode').value = layout; showError(new Error('预览与源码同步布局适用于 Markdown 文档。')); return;
+  }
+  const previous = layout;
+  layout = next; $('layout-mode').value = next; $('editors').dataset.layout = next;
+  $('right-pane').hidden = next === 'single';
+  $('left-pane').querySelector('.pane-heading').hidden = next === 'single';
+  if (next === 'sync') {
+    activeIndex = documents.indexOf(selected); mode = 'visual'; selected.mode = 'visual';
+    activePane = 'left'; secondary?.bind(selected.key, 'source');
+  } else if (next === 'single') {
+    if (!doc() && selected) activeIndex = documents.indexOf(selected);
+    activePane = 'left'; mode = doc()?.mode || 'visual'; secondary?.bind(null);
+  } else {
+    if (previous === 'sync') secondary?.bind(null);
+    if (autoPick && !secondary?.document) {
+      const other = documents.find(item => item.key !== doc()?.key);
+      secondary?.bind(other?.key || null);
+    }
+  }
+  render({ focus: false });
+}
+
+function moveFileRight(key) {
+  capture(); secondary?.capture();
+  const item = documents.find(entry => entry.key === key);
+  if (!item) return;
+  setLayout('files', { autoPick: false });
+  secondary?.bind(key);
+  if (doc()?.key === key) {
+    activeIndex = documents.findIndex(entry => entry.key !== key);
+    mode = doc()?.mode || 'visual';
+    render({ focus: false });
+  }
+  focusPane('right'); secondary?.focus(); updateUI();
+}
+
+function promptNewMarkdown(directoryId = '') {
+  if (!rootFolder) { showError(new Error('请先打开工作文件夹。')); return; }
+  newFileDirectory = directoryId; newFileSide = activePane;
+  $('new-file-title').textContent = `新建 Markdown · ${directoryId || rootFolder.name}`;
+  $('new-file-name').value = '未命名.md'; $('new-file-error').textContent = '';
+  $('new-file-dialog').showModal(); $('new-file-name').focus(); $('new-file-name').select();
+}
+
+async function revealTreeEntry(id) {
+  const parts = id.split('/').slice(0, -1);
+  for (let i = 0; i < parts.length; i++) {
+    const directoryId = parts.slice(0, i + 1).join('/');
+    const details = [...$('file-tree').querySelectorAll('details')].find(node => node.dataset.directoryId === directoryId);
+    if (!details) break;
+    details.open = true; await details.loadChildren?.();
+  }
+}
+
+function showFileMenu(event, entry) {
+  event.preventDefault(); event.stopPropagation(); $('tab-menu').hidden = true;
+  const directoryId = entry.type === 'directory' ? entry.id : entry.id.split('/').slice(0, -1).join('/');
+  const actions = entry.type === 'file' ? [
+    ['打开', () => openWorkspaceFile(entry.id)],
+    ['在右侧打开', () => openWorkspaceFile(entry.id, 'right')],
+  ] : [];
+  actions.push(
+    ['新建 Markdown 文件', () => promptNewMarkdown(directoryId)],
+    ['复制完整路径', () => window.workspaceFiles.entryAction({ action: 'copy-path', id: entry.id }).then(unwrap)],
+    ['在文件夹中显示', () => window.workspaceFiles.entryAction({ action: 'reveal', id: entry.id }).then(unwrap)],
+    ['刷新目录', refreshFolder],
+  );
+  const menu = $('file-menu');
+  menu.replaceChildren(...actions.map(([label, action]) => {
+    const button = document.createElement('button'); button.textContent = label; button.setAttribute('role', 'menuitem');
+    button.onclick = () => { menu.hidden = true; Promise.resolve(action()).catch(showError); };
+    return button;
+  }));
+  menu.hidden = false;
+  menu.style.left = `${Math.max(8, Math.min(event.clientX, innerWidth - menu.offsetWidth - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(event.clientY, innerHeight - menu.offsetHeight - 8))}px`;
+  menu.querySelector('button').focus();
+}
+
+function clearLinkPreview() {
+  linkSequence++; linkAnchor = null; linkPoint = null;
+  $('link-target').hidden = true; $('link-target').textContent = '';
+}
+
+function positionLinkPreview() {
+  const tooltip = $('link-target');
+  if (tooltip.hidden || !linkPoint) return;
+  const rect = tooltip.getBoundingClientRect();
+  let left = linkPoint.x + 14;
+  let top = linkPoint.y + 18;
+  if (left + rect.width > innerWidth - 12) left = linkPoint.x - rect.width - 14;
+  if (top + rect.height > innerHeight - 12) top = linkPoint.y - rect.height - 14;
+  tooltip.style.left = `${Math.max(12, Math.min(left, innerWidth - rect.width - 12))}px`;
+  tooltip.style.top = `${Math.max(12, Math.min(top, innerHeight - rect.height - 12))}px`;
+}
+
+async function previewLink(anchor, event, fromKey = doc()?.key) {
+  const sameAnchor = linkAnchor === anchor;
+  linkAnchor = anchor;
+  const rect = anchor.getBoundingClientRect();
+  linkPoint = event instanceof MouseEvent ? { x: event.clientX, y: event.clientY } : { x: rect.left, y: rect.bottom };
+  if (sameAnchor) { positionLinkPreview(); return; }
+  const request = { href: anchor.getAttribute('href'), fromKey };
+  const sequence = ++linkSequence;
+  $('link-target').hidden = true;
+  try {
+    const link = unwrap(await window.workspaceFiles.describeLink(request));
+    if (sequence !== linkSequence) return;
+    $('link-target').textContent = link.target;
+    $('link-target').hidden = false;
+    positionLinkPreview();
+  } catch { if (sequence === linkSequence) clearLinkPreview(); }
+}
+
+function hideFloatingMenu(viewEngine = engine) {
+  const wysiwyg = viewEngine?.vditor.wysiwyg;
+  if (!wysiwyg) return;
+  clearTimeout(wysiwyg.hlToolbarTimeoutId);
+  wysiwyg.popover.style.display = 'none';
+  wysiwyg.selectPopover.style.display = 'none';
+}
+
+function jumpToHeading(heading) {
+  if (!heading) { showError(new Error('未找到链接指向的标题。')); return; }
+  hideFloatingMenu();
+  const root = richRoot();
+  root.parentElement.classList.add('outline-navigation');
+  root.scrollTop += heading.getBoundingClientRect().top - root.getBoundingClientRect().top - 64;
+}
+
+function jumpToFragment(fragment, side = 'left') {
+  const item = side === 'right' ? secondary?.document : doc();
+  if (!fragment || item?.kind !== 'markdown') return;
+  if (side === 'right') secondary.setMode('visual');
+  else if (mode !== 'visual') setMode('visual');
+  const slug = text => text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}_\s-]/gu, '').trim().replace(/\s+/g, '-');
+  const root = side === 'right' ? secondary.root : richRoot();
+  const heading = [...root.querySelectorAll('h1,h2,h3,h4,h5,h6')].find(node => node.id === fragment || slug(node.textContent) === fragment || node.textContent === fragment);
+  if (side === 'right') secondary.jump(heading); else jumpToHeading(heading);
+}
+
+function acceptFile(file, side = 'left') {
+  let index = documents.findIndex(item => item.key === file.key);
+  if (index < 0) {
+    index = documents.length;
+    documents.push(createDocument(file.name, file.content, file.kind, file.key, file));
+  }
+  if (side === 'right') moveFileRight(file.key); else selectDocument(index, { forceLeft: true });
+  return index;
+}
+
+async function activateLink(request, side = 'left') {
+  const sequence = ++openRequest;
+  try {
+    const result = unwrap(await window.workspaceFiles.activateLink(request));
+    if (sequence !== openRequest) return;
+    if (result.type === 'file') { acceptFile(result.file, side); jumpToFragment(result.fragment, side); }
+    else if (result.type === 'folder') applyFolder(result.folder);
+    else if (result.type === 'anchor') jumpToFragment(result.fragment, side);
+    else if (result.type === 'external') $('status').textContent = '已交由默认浏览器打开。';
+  } catch (error) { showError(error); }
+}
+
+function isDirty(item) { return item.history.current.markdown !== item.history.entries[0].markdown; }
+
+function finishCloseDialog(discard) {
+  const resolve = resolveCloseDialog;
+  resolveCloseDialog = null;
+  $('close-confirm').close(discard ? 'discard' : 'cancel');
+  resolve?.(discard);
+}
+
+async function closeDocuments(keys) {
+  if (closingTabs) return;
+  capture(); secondary?.capture();
+  const requested = new Set(keys);
+  const targets = documents.filter(item => requested.has(item.key));
+  if (!targets.length) return;
+  closingTabs = true;
+  try {
+    const dirty = targets.filter(isDirty);
+    if (dirty.length) {
+      $('close-message').textContent = `${dirty.map(item => item.name).join('、')} 有未保存的修改。`;
+      const confirmed = await new Promise(resolve => {
+        const dialog = $('close-confirm');
+        resolveCloseDialog = resolve;
+        dialog.returnValue = ''; dialog.showModal();
+      });
+      if (!confirmed) return;
+    }
+    openRequest++;
+    const activeKey = doc()?.key;
+    const previousIndex = activeIndex;
+    for (let i = documents.length - 1; i >= 0; i--) if (requested.has(documents[i].key)) documents.splice(i, 1);
+    const surviving = documents.findIndex(item => item.key === activeKey);
+    activeIndex = surviving >= 0 ? surviving : Math.min(previousIndex, documents.length - 1);
+    if (secondary?.key && !secondary.document) { secondary.bind(null); activePane = 'left'; }
+    if (layout === 'sync' && doc()?.kind !== 'markdown') {
+      layout = 'single'; activePane = 'left'; secondary?.bind(null);
+      $('layout-mode').value = layout; $('editors').dataset.layout = layout;
+    }
+    mode = doc()?.mode || 'visual'; render();
+  } finally { closingTabs = false; }
+}
+
+function showTabMenu(event, key) {
+  event.preventDefault(); $('file-menu').hidden = true;
+  const index = documents.findIndex(item => item.key === key);
+  if (index < 0) return;
+  if (focusedDoc()?.key !== key) selectDocument(index);
+  const item = documents[index];
+  const menu = $('tab-menu');
+  const commands = [
+    ['关闭', () => closeDocuments([key])],
+    ['关闭其他标签页', () => closeDocuments(documents.filter(entry => entry.key !== key).map(entry => entry.key))],
+    ['关闭右侧标签页', () => closeDocuments(documents.slice(documents.indexOf(item) + 1).map(entry => entry.key))],
+    ['关闭全部标签页', () => closeDocuments(documents.map(entry => entry.key))],
+    ['移到右侧显示', () => moveFileRight(key)],
+    ['在左侧打开', () => selectDocument(documents.indexOf(item), { forceLeft: true })],
+    ['预览 + 源码同步', () => { selectDocument(documents.indexOf(item), { forceLeft: true }); setLayout('sync'); }, item.kind !== 'markdown'],
+    ['复制完整路径', () => window.workspaceFiles.fileAction({ action: 'copy-path', key }).then(unwrap), !item.file],
+    ['在文件夹中显示', () => window.workspaceFiles.fileAction({ action: 'reveal', key }).then(unwrap), !item.file],
+  ];
+  menu.replaceChildren(...commands.map(([label, action, disabled]) => {
+    const button = document.createElement('button'); button.textContent = label;
+    button.setAttribute('role', 'menuitem'); button.disabled = Boolean(disabled);
+    button.onclick = () => { menu.hidden = true; Promise.resolve(action()).catch(showError); };
+    return button;
+  }));
+  menu.hidden = false;
+  menu.style.left = `${Math.max(8, Math.min(event.clientX, innerWidth - menu.offsetWidth - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(event.clientY, innerHeight - menu.offsetHeight - 8))}px`;
+  menu.querySelector('button:not(:disabled)').focus();
+}
+
+function renderTree(entries, container) {
+  container.replaceChildren(...entries.map(entry => {
+    if (entry.type === 'directory') {
+      const details = document.createElement('details');
+      details.dataset.directoryId = entry.id;
+      const summary = document.createElement('summary');
+      summary.textContent = entry.name;
+      const children = document.createElement('div');
+      children.className = 'tree-children';
+      let loaded = false;
+      let pending = null;
+      details.loadChildren = () => {
+        if (loaded) return Promise.resolve();
+        if (!pending) pending = window.workspaceFiles.list(entry.id).then(unwrap).then(nested => {
+          renderTree(nested, children); loaded = true;
+        }).finally(() => { pending = null; });
+        return pending;
+      };
+      details.addEventListener('toggle', async () => {
+        if (!details.open) return;
+        try { await details.loadChildren(); } catch (error) { showError(error); }
+      });
+      details.append(summary, children);
+      summary.oncontextmenu = event => showFileMenu(event, entry);
+      return details;
+    }
+    const button = document.createElement('button');
+    button.textContent = `▤  ${entry.name}`;
+    button.title = entry.id;
+    button.dataset.fileId = entry.id;
+    button.onclick = () => openWorkspaceFile(entry.id).catch(showError);
+    button.oncontextmenu = event => showFileMenu(event, entry);
+    return button;
+  }));
+  if (!entries.length) {
+    const note = document.createElement('p'); note.className = 'empty-note';
+    note.textContent = '没有可读取的文本文件。'; container.append(note);
+  }
+}
+
+async function chooseFolder() {
+  $('choose-folder').disabled = true;
+  try {
+    const folder = unwrap(await window.workspaceFiles.chooseFolder());
+    if (!folder) return;
+    applyFolder(folder);
+  } catch (error) { showError(error); }
+  finally { $('choose-folder').disabled = false; }
+}
+
+function applyFolder(folder) {
+  rootFolder = folder;
+  $('refresh-folder').disabled = false;
+  $('new-markdown').disabled = false;
+  $('folder-name').textContent = folder.name; $('folder-name').title = folder.path;
+  $('examples-section').open = false; renderTree(folder.entries, $('file-tree'));
+  $('files').hidden = false; $('outline').hidden = true;
+  $('files-tab').setAttribute('aria-selected', 'true'); $('outline-tab').setAttribute('aria-selected', 'false');
+  updateUI();
+}
+
+async function openWorkspaceFile(id, side = 'left') {
+  const request = ++openRequest;
+  const file = unwrap(await window.workspaceFiles.read(id));
+  if (request !== openRequest) return -1;
+  return acceptFile(file, side);
+}
+
+async function refreshFolder() {
+  if (!rootFolder) return;
+  $('refresh-folder').disabled = true;
+  try {
+    renderTree(unwrap(await window.workspaceFiles.list('')), $('file-tree'));
+    updateUI();
+  } catch (error) { showError(error); }
+  finally { $('refresh-folder').disabled = false; }
+}
+
+function textCaret(root) {
+  const selection = getSelection();
+  if (!selection.rangeCount || !root.contains(selection.anchorNode)) return 0;
+  const range = selection.getRangeAt(0).cloneRange();
+  range.selectNodeContents(root);
+  range.setEnd(selection.anchorNode, selection.anchorOffset);
+  return range.toString().length;
+}
+
+function restoreTextCaret(root, offset) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (offset <= node.length) {
+      const range = document.createRange();
+      range.setStart(node, offset);
+      range.collapse(true);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return;
+    }
+    offset -= node.length;
+  }
+  const range = document.createRange();
+  range.selectNodeContents(root);
+  range.collapse(false);
+  getSelection().removeAllRanges();
+  getSelection().addRange(range);
+}
+
+// 仅验证普通段落定位；复杂语法、选区及不可渲染块的映射仍需进一步验证。
+function richCaretToMarkdown() {
+  const root = richRoot();
+  const offset = textCaret(root);
+  const text = root.textContent.slice(0, offset);
+  const tail = text.slice(-24);
+  const markdown = doc().history.current.markdown;
+  const position = tail ? markdown.indexOf(tail) : 0;
+  return position < 0 ? Math.min(offset, markdown.length) : position + tail.length;
+}
+
+function markdownCaretToRich(offset) {
+  const markdown = doc().history.current.markdown;
+  const before = markdown.slice(0, offset);
+  const tail = before.split('\n').at(-1).replace(/^\s{0,3}#{1,6}\s+/, '');
+  const text = richRoot().textContent;
+  const position = tail ? text.indexOf(tail) : 0;
+  restoreTextCaret(richRoot(), position < 0 ? 0 : position + tail.length);
+}
+
+function capture() {
+  if (loading || !engine || !doc()) return;
+  const before = doc().history.current.markdown;
+  if (mode !== 'visual') {
+    const caret = source.value.slice(0, source.selectionStart).replace(/\n/g, doc().lineEnding).length;
+    if (sourceDirty) {
+      doc().history.record(source.value.replace(/\n/g, doc().lineEnding), caret, mode);
+      sourceDirty = false;
+    } else doc().history.current.caret = caret;
+    doc().scrollTop = source.scrollTop;
+  } else {
+    doc().visualScrollTop = richRoot().scrollTop;
+    if (richDirty) {
+      try {
+        const markdown = preserveProtectedBlocks(doc().history.current.markdown, engine.getValue());
+        doc().history.record(markdown, richCaretToMarkdown(), 'visual');
+      } catch (error) {
+        richDirty = false;
+        render();
+        $('status').textContent = error.message;
+        return;
+      }
+      richDirty = false;
+    } else if (richRoot().contains(getSelection().anchorNode)) {
+      doc().history.current.caret = richCaretToMarkdown();
+    }
+  }
+  if (doc().history.current.markdown !== before) secondary?.refresh();
+}
+
+function updateUI() {
+  const active = focusedDoc();
+  const viewMode = activePane === 'right' ? secondary?.mode : mode;
+  const plainText = active?.kind === 'text';
+  $('mode-controls').hidden = plainText || !active || layout === 'sync';
+  $('text-mode-label').hidden = !plainText;
+  $('mode-shortcut').hidden = plainText || !active || layout === 'sync';
+  $('editor-title').textContent = plainText ? '纯文本文件' : '验证直接写作与源码切换';
+  $('editor-hint').textContent = plainText ? '直接查看或编辑文本，语法符号保持原样。' : '试着编辑正文、操作表格，再切换模式，检查内容与撤销是否连贯。';
+  $('visual-mode').setAttribute('aria-pressed', String(viewMode === 'visual'));
+  $('source-mode').setAttribute('aria-pressed', String(viewMode === 'source'));
+  $('undo').disabled = !active?.history.canUndo;
+  $('redo').disabled = !active?.history.canRedo;
+  const modeLabel = plainText ? '纯文本' : viewMode === 'visual' ? '可视编辑' : '源码模式';
+  $('status').textContent = active ? `${modeLabel}${active.file ? ` · ${active.file.encoding}` : ''} · 修改仅暂存本次窗口` : '没有打开的文档';
+  source.setAttribute('aria-label', doc()?.kind === 'text' ? '纯文本内容' : 'Markdown 源码');
+  source.classList.toggle('markdown-source', doc()?.kind === 'markdown');
+  $('left-pane-name').textContent = doc() ? `左侧 · ${doc().name}` : '左侧';
+  $('left-pane').classList.toggle('active-pane', activePane === 'left');
+  $('right-pane').classList.toggle('active-pane', activePane === 'right');
+  $('layout-hint').textContent = layout === 'sync' ? '同一文档，左右均可编辑，内容同步' : layout === 'files' ? '点击左侧或右侧正文选择当前编辑区域' : '';
+  $('word-count').textContent = active ? `${active.history.current.markdown.length.toLocaleString()} 字符` : '';
+  for (const id of ['examples', 'tabs']) {
+    $(id).replaceChildren(...documents.flatMap((item, i) => {
+      if (id === 'examples' && item.file) return [];
+      const button = document.createElement('button');
+      const dirty = isDirty(item);
+      button.textContent = (id === 'examples' ? '▤  ' : '') + item.name + (dirty ? ' ·' : '');
+      button.title = item.file?.path || item.name;
+      button.className = item.key === active?.key ? 'active' : '';
+      button.onclick = () => selectDocument(i);
+      if (id === 'examples') return [button];
+      const tab = document.createElement('div'); tab.className = 'document-tab' + (item.key === active?.key ? ' active' : '');
+      tab.dataset.documentKey = item.key;
+      button.className = 'tab-select'; button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(item.key === active?.key));
+      if (layout === 'files' && item.key === secondary?.key) button.textContent += ' [右侧]';
+      const close = document.createElement('button'); close.className = 'tab-close'; close.textContent = '×';
+      close.setAttribute('aria-label', `关闭 ${item.name}`); close.title = `关闭 ${item.name}`;
+      close.onclick = () => closeDocuments([item.key]);
+      tab.oncontextmenu = event => showTabMenu(event, item.key);
+      tab.onauxclick = event => { if (event.button === 1) { event.preventDefault(); closeDocuments([item.key]); } };
+      tab.append(button, close);
+      return [tab];
+    }));
+  }
+  $('file-tree').querySelectorAll('button[data-file-id]').forEach(button => {
+    button.classList.toggle('active', active?.file?.path && active.file.root === rootFolder?.path && button.dataset.fileId === active.file.id);
+  });
+  const headings = plainText || !active ? [] : [...active.history.current.markdown.matchAll(/^(#{1,6})\s+(.+)$/gm)];
+  $('outline').replaceChildren(...headings.map((match, headingIndex) => {
+    const button = document.createElement('button');
+    button.textContent = match[2];
+    button.style.paddingLeft = `${12 + (match[1].length - 1) * 12}px`;
+    button.onclick = () => {
+      if (activePane === 'right') {
+        const heading = [...secondary.root.querySelectorAll('h1,h2,h3,h4,h5,h6')][headingIndex];
+        secondary.jump(heading, match.index);
+      } else if (mode === 'source') {
+        source.focus();
+        source.setSelectionRange(match.index, match.index);
+        const lineHeight = parseFloat(getComputedStyle(source).lineHeight);
+        source.scrollTop = doc().history.current.markdown.slice(0, match.index).split('\n').length * lineHeight - 60;
+      } else {
+        jumpToHeading([...richRoot().querySelectorAll('h1,h2,h3,h4,h5,h6')][headingIndex]);
+      }
+    };
+    return button;
+  }));
+  if (plainText) {
+    const note = document.createElement('p'); note.className = 'empty-note';
+    note.textContent = '纯文本文件不提供 Markdown 标题大纲。';
+    $('outline').append(note);
+  }
+}
+
+function render({ focus = true } = {}) {
+  $('right-pane').hidden = layout === 'single';
+  $('left-pane').querySelector('.pane-heading').hidden = layout === 'single';
+  clearLinkPreview(); hideFloatingMenu();
+  $('empty-state').hidden = Boolean(doc());
+  if (!doc()) {
+    $('rich').hidden = true; source.hidden = true; source.value = '';
+    syncSecondary(); updateUI(); return;
+  }
+  loading = true;
+  const state = doc().history.current;
+  source.value = state.markdown;
+  if (mode === 'visual') {
+    richRoot().parentElement.classList.add('outline-navigation');
+    engine.setValue(state.markdown, true);
+    richRoot().querySelectorAll('code.language-mermaid, [data-type="math-block"]').forEach(node => {
+      const block = node.closest('.vditor-wysiwyg__block') || node;
+      block.setAttribute('contenteditable', 'false');
+      block.setAttribute('title', '切换源码模式修改此内容');
+    });
+  }
+  $('rich').hidden = mode !== 'visual';
+  source.hidden = mode === 'visual';
+  if (mode !== 'visual') {
+    if (focus) source.focus();
+    const caret = state.markdown.slice(0, state.caret).replace(/\r\n/g, '\n').length;
+    source.setSelectionRange(caret, caret);
+    source.scrollTop = doc().scrollTop ?? 0;
+  } else {
+    if (focus) { engine.focus(); markdownCaretToRich(state.caret); }
+    richRoot().scrollTop = doc().visualScrollTop ?? 0;
+  }
+  richDirty = false;
+  sourceDirty = false;
+  loading = false;
+  syncSecondary();
+  updateUI();
+}
+
+function setMode(next) {
+  if (layout === 'sync') return;
+  if (activePane === 'right') { secondary?.setMode(next); return; }
+  if (next === mode || composing || !doc() || doc().kind !== 'markdown') return;
+  capture();
+  doc().history.closeGroup();
+  mode = next;
+  doc().mode = next;
+  render();
+}
+
+function selectDocument(index, { forceLeft = false } = {}) {
+  if (!documents[index]) return;
+  if (!forceLeft && layout === 'files' && secondary?.key === documents[index].key) { secondary.focus(); updateUI(); return; }
+  capture(); secondary?.capture();
+  if (doc()) { doc().history.closeGroup(); doc().mode = mode; }
+  activeIndex = index;
+  activePane = 'left';
+  mode = doc().mode;
+  if (layout === 'sync') {
+    if (doc().kind !== 'markdown') { layout = 'single'; $('layout-mode').value = 'single'; $('editors').dataset.layout = 'single'; $('right-pane').hidden = true; secondary?.bind(null); }
+    else { mode = 'visual'; doc().mode = 'visual'; }
+  }
+  render();
+}
+
+function undo() { if (activePane === 'right') secondary?.undoRedo('undo'); else if (doc()) { capture(); doc().history.undo(); render(); } }
+function redo() { if (activePane === 'right') secondary?.undoRedo('redo'); else if (doc()) { capture(); doc().history.redo(); render(); } }
+
+document.addEventListener('keydown', event => {
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'w') {
+    event.preventDefault(); event.stopImmediatePropagation();
+    if (!$('close-confirm').open && !$('new-file-dialog').open && !event.isComposing && focusedDoc()) closeDocuments([focusedDoc().key]);
+    return;
+  }
+  if ($('close-confirm').open || $('new-file-dialog').open) return;
+  if (event.key === 'Escape') { $('tab-menu').hidden = true; $('file-menu').hidden = true; clearLinkPreview(); }
+  if (!(event.ctrlKey || event.metaKey) || event.isComposing) return;
+  const key = event.key.toLowerCase();
+  if (key === 'z' || key === 'y') {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (key === 'y' || event.shiftKey) redo(); else undo();
+  }
+  if (key === 'm' && event.shiftKey) {
+    event.preventDefault(); event.stopImmediatePropagation();
+    setMode((activePane === 'right' ? secondary?.mode : mode) === 'visual' ? 'source' : 'visual');
+  }
+}, true);
+
+document.addEventListener('compositionstart', () => { composing = true; });
+document.addEventListener('compositionend', () => { composing = false; setTimeout(() => { capture(); updateUI(); }, 0); });
+source.addEventListener('input', event => { sourceDirty = true; if (!event.isComposing) { capture(); updateUI(); } });
+$('rich').addEventListener('input', () => { if (!loading) richDirty = true; }, true);
+for (const id of ['visual-mode', 'source-mode', 'undo', 'redo']) {
+  $(id).addEventListener('pointerdown', event => { if (activePane === 'right') secondary?.capture(); else capture(); event.preventDefault(); });
+}
+$('visual-mode').onclick = () => setMode('visual');
+$('source-mode').onclick = () => setMode('source');
+$('undo').onclick = undo;
+$('redo').onclick = redo;
+$('close-cancel').onclick = () => finishCloseDialog(false);
+$('close-discard').onclick = () => finishCloseDialog(true);
+$('close-confirm').addEventListener('cancel', event => { event.preventDefault(); finishCloseDialog(false); });
+document.addEventListener('pointerdown', event => { for (const id of ['tab-menu', 'file-menu']) if (!$(id).contains(event.target)) $(id).hidden = true; });
+$('tab-menu').addEventListener('keydown', event => {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const items = [...$('tab-menu').querySelectorAll('button:not(:disabled)')];
+  const index = items.indexOf(document.activeElement);
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+  items[next]?.focus();
+});
+$('choose-folder').onclick = chooseFolder;
+$('refresh-folder').onclick = refreshFolder;
+$('new-markdown').onclick = () => promptNewMarkdown('');
+$('new-file-cancel').onclick = () => $('new-file-dialog').close();
+$('new-file-form').onsubmit = async event => {
+  event.preventDefault();
+  const submit = $('new-file-form').querySelector('[type="submit"]'); submit.disabled = true;
+  $('new-file-cancel').disabled = true;
+  try {
+    const file = unwrap(await window.workspaceFiles.createMarkdown({ directoryId: newFileDirectory, name: $('new-file-name').value }));
+    await refreshFolder(); await revealTreeEntry(file.id);
+    $('new-file-dialog').close(); acceptFile(file, newFileSide);
+  } catch (error) { $('new-file-error').textContent = error.message; }
+  finally { submit.disabled = false; $('new-file-cancel').disabled = false; }
+};
+$('file-tree').oncontextmenu = event => { if (rootFolder) showFileMenu(event, { id: '', type: 'directory' }); };
+$('folder-name').oncontextmenu = event => { if (rootFolder) showFileMenu(event, { id: '', type: 'directory' }); };
+$('layout-mode').onchange = () => setLayout($('layout-mode').value);
+$('close-right-pane').onclick = () => setLayout('single');
+for (const side of ['left', 'right']) {
+  $(`${side}-pane`).addEventListener('pointerdown', () => focusPane(side), true);
+  $(`${side}-pane`).addEventListener('focusin', () => focusPane(side));
+}
+bindToolbarTooltip();
+bindPaneDivider();
+for (const [id, files] of [['files-tab', true], ['outline-tab', false]]) {
+  $(id).onclick = () => {
+    $('files').hidden = !files; $('outline').hidden = files;
+    $('files-tab').setAttribute('aria-selected', String(files));
+    $('outline-tab').setAttribute('aria-selected', String(!files));
+  };
+}
+
+const cdn = new URL('../../node_modules/vditor', location.href).href;
+function bindEditorControls(root = richRoot(), viewEngine = engine, getDocument = doc, side = 'left') {
+  root.addEventListener('pointerdown', () => root.parentElement.classList.remove('outline-navigation'), true);
+  root.addEventListener('keydown', () => root.parentElement.classList.remove('outline-navigation'), true);
+  for (const name of ['mouseover', 'focusin']) root.addEventListener(name, event => {
+    const anchor = event.target.closest?.('a[href]');
+    if (anchor && root.contains(anchor)) previewLink(anchor, event, getDocument()?.key);
+  });
+  root.addEventListener('mousemove', event => {
+    if (linkAnchor?.contains(event.target)) {
+      linkPoint = { x: event.clientX, y: event.clientY };
+      positionLinkPreview();
+    }
+  });
+  for (const name of ['mouseout', 'focusout']) root.addEventListener(name, event => {
+    if (linkAnchor?.contains(event.target) && !linkAnchor.contains(event.relatedTarget)) clearLinkPreview();
+  });
+  root.addEventListener('scroll', clearLinkPreview, { passive: true });
+  window.addEventListener('blur', clearLinkPreview);
+  window.addEventListener('resize', clearLinkPreview);
+  root.addEventListener('click', event => {
+    const anchor = event.target.closest?.('a[href]');
+    if (anchor && root.contains(anchor)) {
+      event.preventDefault(); event.stopImmediatePropagation(); hideFloatingMenu(viewEngine); clearLinkPreview();
+      activateLink({ href: anchor.getAttribute('href'), fromKey: getDocument()?.key }, side);
+    } else root.parentElement.classList.remove('outline-navigation');
+  }, true);
+  const popover = viewEngine.vditor.wysiwyg.popover;
+  let scheduled = false;
+  const place = () => {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      if (getComputedStyle(popover).display === 'none') return;
+      const selection = getSelection();
+      const element = selection.anchorNode?.nodeType === Node.ELEMENT_NODE ? selection.anchorNode : selection.anchorNode?.parentElement;
+      const block = element?.closest('table,h1,h2,h3,h4,h5,h6,blockquote,pre');
+      if (!block || !root.contains(block)) return;
+      const pane = root.getBoundingClientRect();
+      const parent = root.parentElement.getBoundingClientRect();
+      const anchor = block.getBoundingClientRect();
+      const menu = popover.getBoundingClientRect();
+      let top = anchor.top - menu.height - 8;
+      if (top < pane.top + 8) top = (element.closest('tr') || block).getBoundingClientRect().bottom + 8;
+      top = Math.max(pane.top + 8, Math.min(top, pane.bottom - menu.height - 8));
+      const left = Math.max(pane.left + 8, Math.min(anchor.left, pane.right - menu.width - 8));
+      const nextTop = top - parent.top; const nextLeft = left - parent.left;
+      if (Math.abs(parseFloat(popover.style.top) - nextTop) > .5 || !popover.style.top) popover.style.top = `${nextTop}px`;
+      if (Math.abs(parseFloat(popover.style.left) - nextLeft) > .5 || !popover.style.left) popover.style.left = `${nextLeft}px`;
+    });
+  };
+  new MutationObserver(place).observe(popover, { attributes: true, attributeFilter: ['style'], childList: true, subtree: true });
+  new ResizeObserver(place).observe(popover);
+  root.addEventListener('scroll', place);
+  window.addEventListener('resize', place);
+}
+engine = new Vditor('rich', {
+  cdn, lang: 'zh_CN', mode: 'wysiwyg', height: '100%', icon: '',
+  value: sample, cache: { enable: false }, undoDelay: 200,
+  link: { isOpen: false },
+  toolbar: ['headings', 'bold', 'italic', 'strike', '|', 'list', 'ordered-list', 'check', '|', 'quote', 'line', 'inline-code', 'code', 'link', 'table'],
+  preview: {
+    mode: 'editor', hljs: { enable: false }, actions: [],
+    markdown: { codeBlockPreview: false, mathBlockPreview: false, inlineMath: false, autoSpace: false, fixTermTypo: false },
+  },
+  input: () => { if (!loading && !composing && mode === 'visual') { richDirty = true; capture(); updateUI(); } },
+  after: () => {
+    render(); bindEditorControls();
+    secondary = new SecondaryPane({
+      cdn, getDocument: key => documents.find(item => item.key === key),
+      onFocus: () => focusPane('right'),
+      onChange: item => { if (doc()?.key === item.key) render({ focus: false }); else updateUI(); },
+      onState: updateUI, onError: showError,
+      onReady: (root, viewEngine) => bindEditorControls(root, viewEngine, () => secondary.document, 'right'),
+    });
+    secondary.ready.then(resolveReady);
+  },
+});
+
+window.runPrototypeChecks = async () => {
+  const checks = [];
+  const check = (name, passed) => checks.push({ name, passed: Boolean(passed) });
+  check('真实可视编辑区域已载入', richRoot().isContentEditable);
+  check('本地工具栏图标正常载入', document.getElementById('vditor-icon-bold'));
+  check('标题、粗体和表格由编辑器实际渲染', richRoot().querySelector('h1') && richRoot().querySelector('strong') && richRoot().querySelectorAll('table td').length === 6);
+  const original = doc().history.current.markdown;
+  setMode('source');
+  check('进入源码模式不改写正文', source.value === original);
+  setMode('visual');
+  check('无编辑往返不改写正文', doc().history.current.markdown === original);
+
+  // 用实际 contenteditable 输入通道编辑，而不是只操作历史模型。
+  const paragraph = [...richRoot().querySelectorAll('p')].find(node => node.textContent.includes('这是一份'));
+  const range = document.createRange();
+  range.selectNodeContents(paragraph); range.collapse(false);
+  getSelection().removeAllRanges(); getSelection().addRange(range);
+  document.execCommand('insertText', false, '中文编辑验证');
+  await sleep(350);
+  capture();
+  const richVersion = doc().history.current.markdown;
+  check('可视编辑真实输入进入共享文档', richVersion.includes('中文编辑验证'));
+  setMode('source');
+  source.value += '\n源码追加内容\n';
+  source.setSelectionRange(source.value.length, source.value.length);
+  source.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: '源码追加内容' }));
+  const sourceVersion = doc().history.current.markdown;
+  setMode('visual');
+  check('源码修改显示于可视编辑区域', richRoot().textContent.includes('源码追加内容'));
+  undo(); check('跨模式撤销源码编辑', doc().history.current.markdown === richVersion);
+  undo(); check('继续撤销可视编辑', doc().history.current.markdown === original);
+  redo(); redo(); check('跨模式重做两次编辑', doc().history.current.markdown === sourceVersion);
+  undo();
+  setMode('source');
+  source.value += '\n分支修改\n'; source.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  check('撤销后新编辑清除旧重做分支', !doc().history.canRedo);
+  selectDocument(1); selectDocument(0);
+  check('标签页切换保留修改', doc().history.current.markdown.includes('分支修改'));
+
+  selectDocument(1); setMode('visual');
+  const output = engine.getValue();
+  const mermaidRaw = '~~~mermaid\nflowchart LR\n  A[开始] --> B[完成]  \n~~~';
+  const mathRaw = '$$\nx  =  y + 1  \n$$';
+  const observations = {
+    nativeMermaidPreservedExactly: output.includes(mermaidRaw),
+    nativeMathPreservedExactly: output.includes(mathRaw),
+    nativeRoundTrip: output,
+    caretMapping: '仅为普通段落的文本定位；重复文本、复杂格式和完整选区尚未验证',
+    chineseIME: '实际中文输入法的候选、组合及撤销行为尚需人工验证；自动检查仅覆盖中文文本输入',
+  };
+  const ordinary = [...richRoot().querySelectorAll('p')].find(node => node.textContent.includes('编辑这一段'));
+  const compatibilityRange = document.createRange();
+  compatibilityRange.selectNodeContents(ordinary); compatibilityRange.collapse(false);
+  getSelection().removeAllRanges(); getSelection().addRange(compatibilityRange);
+  document.execCommand('insertText', false, '追加正文');
+  await sleep(350); capture();
+  check('编辑普通正文成功，原始 Mermaid 围栏和行尾空格保留', doc().history.current.markdown.includes('追加正文') && doc().history.current.markdown.includes(mermaidRaw));
+  check('编辑普通正文后，公式片段原样保留', doc().history.current.markdown.includes(mathRaw));
+  setMode('source'); setMode('visual');
+  check('有保护片段时跨模式往返保持原文', doc().history.current.markdown.includes(mermaidRaw) && doc().history.current.markdown.includes(mathRaw));
+  check('普通代码块内的公式示例不被当作独立公式', protectedBlocks('```text\n$$\nx=1\n$$\n```').length === 0);
+  const beforeRemoval = doc().history.current.markdown;
+  richRoot().querySelector('code.language-mermaid').closest('.vditor-wysiwyg__block').remove();
+  richRoot().dispatchEvent(new InputEvent('input', { bubbles: true })); capture();
+  check('可视模式删除保护片段时保留原文并提示源码编辑', doc().history.current.markdown === beforeRemoval && $('status').textContent.includes('源码模式'));
+  selectDocument(2);
+  const start = performance.now(); render();
+  const renderCallMilliseconds = Math.round(performance.now() - start);
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  observations.textSample = { characters: suggestedScale.length, renderCallMilliseconds, scope: '已载入编辑器的同步渲染调用，仅文字样本，非首次打开、输入延迟或完整性能验收' };
+  selectDocument(0);
+  documents[0].history = new DocumentHistory(sample);
+  mode = 'visual'; render();
+  await sleep(350);
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  check('验证结束已恢复干净的示例文档', doc().history.current.markdown === sample && !richRoot().textContent.includes('中文编辑验证'));
+  await chooseFolder();
+  const listed = [...$('file-tree').querySelectorAll('[data-file-id]')].map(button => button.dataset.fileId);
+  check('真实目录列出 Markdown、TXT、代码、未知扩展名及无扩展名文本', ['README.MD', 'notes.txt', 'main.js', 'custom.xyz', 'LICENSE'].every(id => listed.includes(id)));
+  check('二进制文件不会作为文本列出', !listed.includes('image.bin'));
+  const nested = $('file-tree').querySelector('[data-directory-id="nested"]');
+  nested.open = true;
+  for (let i = 0; i < 40 && !nested.querySelector('[data-file-id]'); i++) await sleep(25);
+  check('展开真实子文件夹后列出文本文件', nested.querySelector('[data-file-id="nested/说明.txt"]'));
+  await openWorkspaceFile('README.MD');
+  check('Markdown 文件首次打开默认可视编辑，大小写扩展名均识别', doc().kind === 'markdown' && mode === 'visual' && richRoot().querySelector('h1')?.textContent === '文件夹里的 Markdown');
+  const markdownIndex = activeIndex;
+  const count = documents.length;
+  await openWorkspaceFile('README.MD');
+  check('重复点击真实文件复用标签页', documents.length === count);
+  await openWorkspaceFile('notes.txt');
+  const textIndex = activeIndex;
+  check('TXT 使用纯文本，Markdown 标记保持字面显示', mode === 'text' && source.value === '# 纯文本标题\n**不是加粗**\n' && $('rich').hidden && $('mode-controls').hidden);
+  capture();
+  check('仅查看 CRLF 文本不会产生修改或改变换行', !doc().history.canUndo && doc().history.current.markdown === '# 纯文本标题\r\n**不是加粗**\r\n');
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', ctrlKey: true, shiftKey: true, bubbles: true }));
+  check('纯文本文件不能误切为 Markdown 编辑', mode === 'text');
+  source.value += '本次窗口中的修改\n';
+  source.setSelectionRange(source.value.length, source.value.length);
+  source.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  const textEdited = doc().history.current.markdown;
+  undo(); check('纯文本编辑可撤销且保留原始换行', doc().history.current.markdown === '# 纯文本标题\r\n**不是加粗**\r\n');
+  redo(); check('纯文本编辑可重做', doc().history.current.markdown === textEdited);
+  selectDocument(markdownIndex); selectDocument(textIndex);
+  check('两类标签页切换保留纯文本模式与修改', mode === 'text' && source.value.includes('本次窗口中的修改'));
+  await refreshFolder();
+  check('刷新目录保留已打开的文档和修改', mode === 'text' && doc().history.current.markdown === textEdited && $('file-tree').querySelector('[data-file-id="main.js"]'));
+  await openWorkspaceFile('main.js');
+  check('代码文件按普通文本显示，不经过 Markdown 排版', mode === 'text' && source.value.includes('"**不渲染**"') && $('outline').textContent.includes('纯文本文件'));
+  await openWorkspaceFile('page.html');
+  check('HTML 文件仅按文本显示，不执行其中的脚本', mode === 'text' && source.value.startsWith('<script>') && !window.__fileExecuted);
+  await openWorkspaceFile('custom.xyz');
+  check('未知扩展名的可解码文本可以打开', mode === 'text' && source.value.includes('不依赖文本扩展名'));
+  await openWorkspaceFile('LICENSE');
+  check('无扩展名的文本可以打开', mode === 'text' && source.value.includes('无扩展名'));
+  await openWorkspaceFile('nested/说明.txt');
+  check('UTF-16 中文文本可正常读取且移除编码标记', source.value === '带 BOM 的中文文本\n' && doc().file.encoding === 'utf-16le');
+  await openWorkspaceFile('legacy.txt');
+  check('GBK 兼容文本可正常读取', source.value === '中文\n' && doc().file.encoding === 'gb18030');
+  check('读取接口拒绝二进制内容', (await window.workspaceFiles.read('image.bin'))?.error);
+  check('读取接口限制在所选文件夹内', (await window.workspaceFiles.read('../outside.txt'))?.error);
+  await openWorkspaceFile('README.MD');
+  await sleep(250);
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  return { versions: { vditor: engine.version, chromium: navigator.userAgent }, checks, observations };
+};

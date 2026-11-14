@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self' data:; object-src 'none'; base-uri 'none'">
+  <title>SuperMarkdown · 编辑验证原型</title>
+  <link rel="stylesheet" href="../../node_modules/vditor/dist/index.css">
+  <link rel="stylesheet" href="style.css">
+  <script defer src="../../node_modules/vditor/dist/index.min.js"></script>
+  <script defer src="../../node_modules/vditor/dist/js/icons/ant.js"></script>
+  <script type="module" src="renderer.mjs"></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand"><span class="logo">M</span><strong>SuperMarkdown</strong><span class="badge">编辑验证原型</span></div>
+    <div id="mode-controls" class="mode-switch" aria-label="编辑模式">
+      <button id="visual-mode" aria-pressed="true">可视编辑</button>
+      <button id="source-mode" aria-pressed="false">源码</button>
+    </div>
+    <span id="text-mode-label" class="badge" hidden>纯文本</span>
+  </header>
+  <div class="workspace">
+    <aside>
+      <div class="sidebar-tabs"><button id="files-tab" aria-selected="true">文件</button><button id="outline-tab" aria-selected="false">大纲</button></div>
+      <div id="files">
+        <button id="choose-folder" class="open-folder">＋ 打开文件夹</button>
+        <button id="new-markdown" class="new-markdown" disabled>＋ 新建 Markdown</button>
+        <button id="refresh-folder" class="refresh-folder" disabled>刷新目录</button>
+        <div id="folder-name" class="sidebar-label">尚未打开文件夹</div>
+        <nav id="file-tree" aria-label="文件夹目录"><p class="empty-note">打开文件夹后，在此浏览 Markdown、TXT 和代码等文本文件。</p></nav>
+        <details id="examples-section" open><summary>内置示例</summary><nav id="examples" aria-label="示例文档"></nav></details>
+      </div>
+      <nav id="outline" aria-label="文档大纲" hidden></nav>
+      <p class="sidebar-note">支持读取本地文件。修改暂存于<br>本次窗口，关闭前请自行保留。</p>
+    </aside>
+    <main>
+      <div id="tabs" class="document-tabs" aria-label="打开的文档"></div>
+      <section class="intro"><strong id="editor-title">验证直接写作与源码切换</strong><span id="editor-hint">试着编辑正文、操作表格，再切换模式，检查内容与撤销是否连贯。</span></section>
+      <div class="actions"><button id="undo">↶ 撤销</button><button id="redo">↷ 重做</button><span>Ctrl+Z / Ctrl+Y</span><span id="mode-shortcut" class="shortcut">切换模式 Ctrl+Shift+M</span></div>
+      <div class="layout-bar"><label for="layout-mode">显示布局</label><select id="layout-mode"><option value="single">单文件</option><option value="files">双文件并排</option><option value="sync">预览 + 源码同步</option></select><span id="layout-hint"></span></div>
+      <div class="editor-area" id="editors" data-layout="single">
+        <section id="left-pane" class="editor-pane active-pane"><div class="pane-heading" hidden><span id="left-pane-name">左侧</span></div><div class="pane-content"><div id="empty-state" hidden>从左侧选择文件，或打开一个本地文件夹开始。</div><div id="rich"></div><textarea id="source" aria-label="Markdown 源码" spellcheck="false" hidden></textarea></div></section>
+        <div id="pane-divider" role="separator" aria-label="调整左右正文宽度" aria-orientation="vertical" aria-controls="left-pane right-pane" tabindex="0" title="拖动调整左右宽度，双击恢复等宽"></div>
+        <section id="right-pane" class="editor-pane" hidden><div class="pane-heading"><span id="right-pane-name">右侧</span><button id="close-right-pane" aria-label="关闭分屏">×</button></div><div class="pane-content"><div id="right-empty">右键选择文件，在右侧打开。</div><div id="right-rich" hidden></div><textarea id="right-source" aria-label="右侧文本" spellcheck="false" hidden></textarea></div></section>
+      </div>
+      <footer><span id="status" role="status">正在载入本地编辑器…</span><span id="word-count"></span></footer>
+    </main>
+  </div>
+  <div id="link-target" role="tooltip" hidden></div>
+  <div id="toolbar-tooltip" role="tooltip" hidden></div>
+  <div id="tab-menu" class="tab-menu" role="menu" aria-label="文件标签页菜单" hidden></div>
+  <div id="file-menu" class="tab-menu" role="menu" aria-label="目录操作菜单" hidden></div>
+  <dialog id="new-file-dialog" aria-labelledby="new-file-title"><form id="new-file-form"><h3 id="new-file-title">新建 Markdown 文件</h3><label for="new-file-name">文件名</label><input id="new-file-name" value="未命名.md" autocomplete="off" required><p id="new-file-error" role="alert"></p><div class="dialog-actions"><button id="new-file-cancel" type="button">取消</button><button type="submit">创建</button></div></form></dialog>
+  <dialog id="close-confirm" aria-labelledby="close-title">
+    <h3 id="close-title">关闭未保存的文档？</h3>
+    <p id="close-message"></p>
+    <p>当前原型的修改尚未写回文件。需要保留时，请先返回文档复制内容。</p>
+    <div class="dialog-actions"><button id="close-cancel" autofocus>返回文档</button><button id="close-discard">放弃修改并关闭</button></div>
+  </dialog>
+</body>
+</html>

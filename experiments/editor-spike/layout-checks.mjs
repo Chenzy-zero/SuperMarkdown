@@ -1,0 +1,90 @@
+export async function runLayoutChecks() {
+  const $ = id => document.getElementById(id);
+  const checks = [];
+  const check = (name, passed) => checks.push({ name, passed: Boolean(passed) });
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const until = async predicate => { for (let i = 0; i < 80; i++) { if (predicate()) return true; await wait(25); } return false; };
+  const layout = value => { $('layout-mode').value = value; $('layout-mode').dispatchEvent(new Event('change')); };
+  const root = document.querySelector('#rich .vditor-wysiwyg > .vditor-reset');
+  const padding = element => { const css = getComputedStyle(element); return [parseFloat(css.paddingLeft), parseFloat(css.paddingRight)]; };
+  const sameGutters = (a, b) => padding(a).every((value, i) => Math.abs(value - padding(b)[i]) < 1);
+  check('同步分屏的预览与源码使用相同的左右留白', sameGutters(root, $('right-source')));
+  layout('single');
+  const visualPadding = padding(root);
+  $('source-mode').click();
+  check('单文件源码与预览使用相同的居中阅读宽度', visualPadding.every((value, i) => Math.abs(value - padding($('source'))[i]) < 1) && Math.abs(padding($('source'))[0] - padding($('source'))[1]) < 1);
+  layout('sync');
+  const splitter = $('pane-divider');
+  check('分屏提供可操作的竖向分隔条', splitter && getComputedStyle(splitter).display !== 'none' && splitter.getAttribute('role') === 'separator');
+  if (splitter) {
+    const area = $('editors');
+    const contents = [$('right-source').value, root.textContent];
+    const rect = area.getBoundingClientRect();
+    const drag = x => {
+      splitter.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 7, button: 0, clientX: splitter.getBoundingClientRect().left }));
+      splitter.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 7, clientX: x }));
+      splitter.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 7 }));
+    };
+    drag(rect.left + rect.width * .65);
+    const leftWidth = $('left-pane').getBoundingClientRect().width;
+    check('拖动分隔条可调整左右正文宽度', leftWidth > rect.width * .63 && leftWidth < rect.width * .67);
+    check('拖动宽度不改变文档内容并保持留白一致', $('right-source').value === contents[0] && root.textContent === contents[1] && sameGutters(root, $('right-source')));
+    drag(rect.left - 500);
+    check('拖到边缘时两侧仍保留可用宽度', $('left-pane').getBoundingClientRect().width >= 279 && $('right-pane').getBoundingClientRect().width >= 279);
+    drag(rect.right + 500);
+    check('向右拖到边缘时保留右侧最小宽度', $('right-pane').getBoundingClientRect().width >= 279);
+    splitter.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    splitter.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    check('分隔条支持键盘调整且更新辅助信息', Number(splitter.getAttribute('aria-valuenow')) > Number(splitter.getAttribute('aria-valuemin')));
+    splitter.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    check('双击分隔条可恢复左右等宽', Math.abs($('left-pane').getBoundingClientRect().width - $('right-pane').getBoundingClientRect().width) < 2);
+    area.style.width = '500px'; await wait(60);
+    check('窄窗口调整不会使任一侧消失', $('left-pane').getBoundingClientRect().width > 200 && $('right-pane').getBoundingClientRect().width > 200);
+    area.style.width = ''; await wait(60);
+    drag(area.getBoundingClientRect().left + area.clientWidth * .6);
+    layout('single');
+    check('单文件布局不展示分隔条', getComputedStyle(splitter).display === 'none');
+    layout('sync');
+    check('重新进入分屏保留本次调整比例', $('left-pane').getBoundingClientRect().width > area.clientWidth * .58);
+  }
+  layout('single');
+  const file = id => [...document.querySelectorAll('#file-tree [data-file-id]')].find(node => node.dataset.fileId === id);
+  const tab = name => [...document.querySelectorAll('#tabs .tab-select')].find(node => node.textContent.startsWith(name));
+  const closeShortcut = () => {
+    const event = new KeyboardEvent('keydown', { key: 'w', ctrlKey: true, bubbles: true, cancelable: true });
+    document.dispatchEvent(event); return event.defaultPrevented;
+  };
+  file('notes.txt').click(); await until(() => Boolean(tab('notes.txt')));
+  check('Ctrl+W 拦截系统关闭并关闭当前干净标签页', closeShortcut() && await until(() => !tab('notes.txt')));
+  tab('README.MD').click();
+  layout('sync');
+  $('right-source').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  closeShortcut();
+  check('同步模式 Ctrl+W 关闭前提示文档未保存', $('close-confirm').open);
+  if ($('close-confirm').open) {
+    closeShortcut();
+    $('close-cancel').click(); await wait(30);
+    check('取消快捷关闭后保留同文档的两侧内容', tab('README.MD') && $('right-source').value.includes('左侧修改'));
+  }
+  layout('single');
+  file('custom.xyz').click(); await until(() => Boolean(tab('custom.xyz')));
+  tab('custom.xyz').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 400, clientY: 90 }));
+  [...$('tab-menu').querySelectorAll('button')].find(node => node.textContent === '移到右侧显示').click();
+  closeShortcut(); await wait(30);
+  check('双文件模式 Ctrl+W 只关闭当前右侧文档', !tab('custom.xyz') && Boolean(tab('README.MD')));
+  layout('single'); tab('README.MD').click(); layout('sync');
+  closeShortcut();
+  if ($('close-confirm').open) $('close-discard').click();
+  await wait(30);
+  check('同步模式确认关闭后移除同一文档的两种视图', !tab('README.MD') && !$('left-pane-name').textContent.includes('README.MD') && !$('right-pane-name').textContent.includes('README.MD'));
+  const remaining = document.querySelector('#tabs .tab-select');
+  remaining.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 400, clientY: 90 }));
+  [...$('tab-menu').querySelectorAll('button')].find(node => node.textContent === '关闭全部标签页').click();
+  if ($('close-confirm').open) $('close-discard').click();
+  await wait(30);
+  check('没有标签页时 Ctrl+W 保留可继续打开文件的窗口', closeShortcut() && document.querySelectorAll('#tabs .document-tab').length === 0 && !$('empty-state').hidden);
+  file('README.MD').click(); await until(() => Boolean(tab('README.MD'))); layout('sync');
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  await wait(100);
+  return { checks };
+}

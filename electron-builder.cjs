@@ -1,0 +1,26 @@
+module.exports = {
+  appId: 'local.supermarkdown.prototype',
+  productName: 'SuperMarkdown',
+  directories: { output: 'dist' },
+  electronDist: 'node_modules/electron/dist',
+  asar: true,
+  npmRebuild: false,
+  files: ['experiments/editor-spike/**/*', 'README.md', 'docs/releases/0.1.0.md'],
+  win: {
+    target: [{ target: 'nsis', arch: ['x64'] }, { target: 'zip', arch: ['x64'] }],
+    artifactName: 'SuperMarkdown-${version}-windows-${arch}.${ext}',
+    signExecutable: false,
+    icon: 'build/icon.ico',
+  },
+  nsis: {
+    artifactName: 'SuperMarkdown-${version}-windows-${arch}-setup.${ext}',
+    oneClick: false,
+    perMachine: false,
+    allowToChangeInstallationDirectory: true,
+    runAfterFinish: false,
+    createDesktopShortcut: true,
+    shortcutName: 'SuperMarkdown',
+    uninstallDisplayName: 'SuperMarkdown',
+  },
+  publish: null,
+};

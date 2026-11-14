@@ -1,0 +1,4 @@
+minimumReleaseAgeExclude:
+  - electron@45.3.2
+storeDir: .pnpm-store
+verifyDepsBeforeRun: warn

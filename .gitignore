@@ -1,0 +1,25 @@
+# 本机编辑器与系统文件
+.idea/
+.vs/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# 本机配置与敏感信息
+.env
+.env.*
+!.env.example
+
+# 临时文件
+*.log
+*.tmp
+*.swp
+~$*
+
+# 依赖、运行文件与原型检查产物
+node_modules/
+.pnpm-store/
+.electron-cache/
+.prototype-artifacts/
+dist/
+.build-cache/

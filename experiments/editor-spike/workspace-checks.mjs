@@ -1,0 +1,106 @@
+export async function runWorkspaceChecks() {
+  const checks = [];
+  const check = (name, passed) => checks.push({ name, passed: Boolean(passed) });
+  const button = document.querySelector('#rich .vditor-toolbar [aria-label]');
+  button.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+  const tooltip = document.getElementById('toolbar-tooltip');
+  check('顶部工具栏提示使用不受编辑区裁剪的浮层', tooltip && !tooltip.hidden && getComputedStyle(tooltip).position === 'fixed' && !tooltip.closest('.editor-area'));
+  const tipRect = tooltip.getBoundingClientRect(); const buttonRect = button.getBoundingClientRect();
+  check('工具栏提示完整显示在按钮下方且位于窗口内', tooltip.textContent === button.getAttribute('aria-label') && tipRect.top >= buttonRect.bottom + 4 && tipRect.bottom <= innerHeight && tipRect.left >= 0 && tipRect.right <= innerWidth);
+  button.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
+  check('目录提供新建 Markdown 文件入口', document.getElementById('new-markdown'));
+  document.querySelector('#file-tree [data-file-id]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 120, clientY: 300 }));
+  check('文件目录右键显示文件操作菜单', document.getElementById('file-menu') && !document.getElementById('file-menu').hidden);
+  check('提供双文件与预览源码同步的布局选择', document.getElementById('layout-mode')?.querySelectorAll('option').length >= 3);
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const until = async predicate => {
+    for (let i = 0; i < 100; i++) { if (predicate()) return true; await wait(25); }
+    return false;
+  };
+  const selectLayout = value => { const select = document.getElementById('layout-mode'); select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })); };
+  const entry = id => [...document.querySelectorAll('#file-tree [data-file-id]')].find(node => node.dataset.fileId === id);
+  const menuAction = (menuId, label) => [...document.querySelectorAll(`#${menuId} button`)].find(node => node.textContent === label).click();
+  const root = document.querySelector('#rich .vditor-wysiwyg > .vditor-reset');
+  const rightRoot = document.querySelector('#right-rich .vditor-wysiwyg > .vditor-reset');
+  const rightSource = document.getElementById('right-source');
+  const openRight = async id => {
+    entry(id).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 120, clientY: 350 }));
+    menuAction('file-menu', '在右侧打开');
+    await until(() => document.getElementById('right-pane-name').textContent.includes(id.split('/').at(-1)));
+  };
+  check('目录文件菜单提供打开、分屏、新建与路径操作', ['打开', '在右侧打开', '新建 Markdown 文件', '复制完整路径', '在文件夹中显示'].every(label => [...document.querySelectorAll('#file-menu button')].some(node => node.textContent === label)));
+  document.querySelector('[data-directory-id="nested"] summary').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 120, clientY: 300 }));
+  menuAction('file-menu', '新建 Markdown 文件');
+  document.getElementById('new-file-name').value = '新建验证';
+  document.getElementById('new-file-form').requestSubmit();
+  check('目录右键可实际创建并打开子目录中的 md 文件', await until(() => !document.getElementById('new-file-dialog').open && [...document.querySelectorAll('#tabs .tab-select')].some(node => node.textContent.startsWith('新建验证.md'))));
+  const created = await window.workspaceFiles.read('nested/新建验证.md');
+  check('新文件已落盘且为普通空白 Markdown 文件', created.kind === 'markdown' && created.content === '' && Boolean(entry('nested/新建验证.md')));
+  const duplicate = await window.workspaceFiles.createMarkdown({ directoryId: 'nested', name: '新建验证' });
+  check('新建文件不会覆盖同名原文件', duplicate.error?.includes('同名文件已存在') && (await window.workspaceFiles.read('nested/新建验证.md')).content === '');
+  const invalid = await window.workspaceFiles.createMarkdown({ directoryId: 'nested', name: '../越界' });
+  check('新建文件拒绝路径穿越名称', invalid.error);
+
+  await openRight('main.js');
+  check('目录右键可将代码文件在右侧按纯文本打开', document.getElementById('layout-mode').value === 'files' && !document.getElementById('right-pane').hidden && !rightSource.hidden && rightSource.value.startsWith('const value'));
+  const leftBefore = root.textContent;
+  rightSource.focus(); rightSource.value += '\n// RIGHT 独立修改\n';
+  rightSource.setSelectionRange(rightSource.value.length, rightSource.value.length);
+  rightSource.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  check('双文件编辑右侧不改动左侧文档', root.textContent === leftBefore && !root.textContent.includes('RIGHT 独立修改'));
+  await openRight('README.MD');
+  check('右侧也提供可直接编辑的 Markdown 视图', !document.getElementById('right-rich').hidden && rightRoot.isContentEditable && rightRoot.querySelector('h1')?.textContent === '文件夹里的 Markdown');
+  rightRoot.focus();
+  const paragraph = rightRoot.querySelector('p');
+  const range = document.createRange(); range.selectNodeContents(paragraph); range.collapse(false);
+  getSelection().removeAllRanges(); getSelection().addRange(range);
+  document.execCommand('insertText', false, '右侧可视修改');
+  await wait(350);
+  document.getElementById('source-mode').click();
+  check('右侧 Markdown 可在可视编辑和源码模式间切换', !rightSource.hidden && rightSource.value.includes('右侧可视修改'));
+
+  selectLayout('sync');
+  check('同步布局固定左侧可视编辑与右侧源码', !document.getElementById('rich').hidden && !rightSource.hidden && document.getElementById('source').hidden && document.getElementById('layout-mode').value === 'sync');
+  const syncBase = rightSource.value;
+  rightSource.focus(); rightSource.value += '\n\n## 同步标题\n\n同步正文\n';
+  rightSource.setSelectionRange(rightSource.value.length, rightSource.value.length);
+  rightSource.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  check('编辑右侧源码即时更新左侧排版', await until(() => [...root.querySelectorAll('h2')].some(node => node.textContent === '同步标题')));
+  check('源码同步不会抢走焦点或重置输入光标', document.activeElement === rightSource && rightSource.selectionStart === rightSource.value.length);
+  root.focus();
+  const syncParagraph = [...root.querySelectorAll('p')].find(node => node.textContent === '同步正文');
+  const editRange = document.createRange(); editRange.selectNodeContents(syncParagraph); editRange.collapse(false);
+  getSelection().removeAllRanges(); getSelection().addRange(editRange);
+  document.execCommand('insertText', false, ' · 左侧修改');
+  await wait(350);
+  check('直接编辑左侧排版同步更新右侧源码', rightSource.value.includes('同步正文 · 左侧修改') && document.activeElement === root);
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
+  check('同步两侧共用撤销历史，首先撤销左侧编辑', !rightSource.value.includes('左侧修改') && rightSource.value.includes('同步标题'));
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
+  check('继续撤销可回到右侧源码修改之前', rightSource.value === syncBase);
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', ctrlKey: true, bubbles: true }));
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', ctrlKey: true, bubbles: true }));
+  check('同步两侧的重做恢复两次编辑', rightSource.value.includes('同步正文 · 左侧修改'));
+  // 隐藏窗口的 focus() 不保证发出原生焦点事件，重放用户点击正文的切换动作。
+  rightSource.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  rightSource.focus();
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
+  check('从右侧执行撤销也同步更新左侧正文', !root.textContent.includes('左侧修改') && rightSource.value.includes('同步标题'));
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', ctrlKey: true, bubbles: true }));
+  check('从右侧重做恢复两侧内容', root.textContent.includes('同步正文 · 左侧修改') && rightSource.value.includes('同步正文 · 左侧修改'));
+  check('从右侧重做保留输入焦点', document.activeElement === rightSource);
+
+  selectLayout('single');
+  check('退出同步分屏保留文档内容', document.getElementById('right-pane').hidden && root.textContent.includes('同步正文 · 左侧修改'));
+  const tab = [...document.querySelectorAll('#tabs .tab-select')].find(node => node.textContent.startsWith('README.MD'));
+  tab.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 400, clientY: 90 }));
+  menuAction('tab-menu', '移到右侧显示');
+  check('标签页右键支持移到右侧显示且保留编辑', !document.getElementById('right-pane').hidden && (rightSource.hidden ? rightRoot.textContent : rightSource.value).includes('同步正文 · 左侧修改'));
+  selectLayout('single');
+  entry('README.MD').click();
+  await until(() => document.getElementById('left-pane-name').textContent.includes('README.MD'));
+  selectLayout('sync');
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  await wait(100);
+  return { checks };
+}

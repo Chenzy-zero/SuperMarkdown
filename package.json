@@ -1,0 +1,27 @@
+{
+  "name": "supermarkdown",
+  "version": "0.1.0",
+  "private": true,
+  "description": "面向 Windows 的 Markdown 可视编辑器技术验证",
+  "main": "experiments/editor-spike/main.cjs",
+  "author": "Chenzy-zero",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "setup:electron": "node tools/setup-electron.cjs",
+    "prototype": "node tools/run-prototype.cjs",
+    "prototype:check": "node tools/run-prototype.cjs --verify",
+    "prototype:ux-check": "node tools/run-prototype.cjs --ux-verify",
+    "dist:win": "node tools/build-windows.cjs"
+  },
+  "dependencies": {
+    "vditor": "4.0.1"
+  },
+  "devDependencies": {
+    "electron": "45.3.2",
+    "electron-builder": "26.18.0"
+  }
+}
