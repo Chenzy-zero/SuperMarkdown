@@ -90,7 +90,17 @@ app.whenReady().then(async () => {
     return workspace.openFolder(result.filePaths[0]);
   });
   handle('application:startup', () => ({ verify: verify && !startupVerify, drafts: recovered, recoveryError }));
-  handle('application:take-open-files', () => opening.take());
+  async function withFileFolder(file) {
+    try {
+      const folder = await workspace.folderForFile(file.key);
+      return { file: { ...file, root: folder.path, id: path.basename(file.path) }, folder };
+    } catch (error) { return { file, folderError: `已打开文件，但无法读取所在目录：${error.message}` }; }
+  }
+  handle('application:take-open-files', async () => {
+    const results = await opening.take();
+    for (let i = 0; i < results.length; i++) if (results[i].file) results[i] = await withFileFolder(results[i].file);
+    return results;
+  });
   handle('application:default-apps', async () => {
     if (!verify) await shell.openExternal('ms-settings:defaultapps');
     return { ok: true };
@@ -98,7 +108,18 @@ app.whenReady().then(async () => {
   handle('workspace:open-file', async () => {
     const result = verify ? { canceled: false, filePaths: [path.join(fixtureRoot, 'README.MD')] } :
       await dialog.showOpenDialog(window, { title: '打开文本文件', properties: ['openFile'], filters: [{ name: '文本文件', extensions: ['md', 'txt', '*'] }] });
-    return result.canceled ? null : workspace.readAbsolute(result.filePaths[0]);
+    return result.canceled ? null : withFileFolder(await workspace.readAbsolute(result.filePaths[0]));
+  });
+  handle('workspace:open-dropped', async paths => {
+    if (!Array.isArray(paths) || !paths.length) throw new Error('请从资源管理器拖入本地文本文件。');
+    const results = [];
+    for (const filename of paths) {
+      try {
+        if (typeof filename !== 'string' || !path.isAbsolute(filename)) throw new Error('拖入的文件路径无效。');
+        results.push(await withFileFolder(await workspace.readAbsolute(filename)));
+      } catch (error) { results.push({ error: `无法打开 ${typeof filename === 'string' ? path.basename(filename) : '文件'}：${error.message}` }); }
+    }
+    return results;
   });
   let testDelay = 0, cancelNextSave = false, closeApprovals = 0;
   handle('workspace:save', async request => {
@@ -149,11 +170,11 @@ app.whenReady().then(async () => {
     else throw new Error('未知验证操作。');
     return { ok: true };
   });
-  handle('workspace:list', id => workspace.list(id));
-  handle('workspace:read', id => workspace.read(id));
-  handle('workspace:create-markdown', ({ directoryId, name }) => workspace.createMarkdown(directoryId, name));
-  handle('workspace:entry-action', async ({ action, id }) => {
-    const entry = await workspace.resolve(id);
+  handle('workspace:list', (id, root) => workspace.list(id, root));
+  handle('workspace:read', (id, root) => workspace.read(id, root));
+  handle('workspace:create-markdown', ({ directoryId, name, root }) => workspace.createMarkdown(directoryId, name, root));
+  handle('workspace:entry-action', async ({ action, id, root }) => {
+    const entry = await workspace.resolve(id, root);
     if (action === 'copy-path') { if (!verify) await clipboard.writeText(entry.fullPath); }
     else if (action === 'reveal') { if (!verify) shell.showItemInFolder(entry.fullPath); }
     else throw new Error('不支持这个文件操作。');

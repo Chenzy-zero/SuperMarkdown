@@ -106,3 +106,35 @@ test('损坏的恢复文件不会被静默清空', async () => {
   await assert.rejects(store.read());
   assert.equal(await fs.readFile(store.path, 'utf8'), '{broken');
 });
+
+test('切换文件夹后按明确目录读取同名文件，不串到新目录', async () => {
+  const root = await fixture(), first = path.join(root, '目录一'), second = path.join(root, '目录二');
+  await fs.mkdir(first); await fs.mkdir(second);
+  await fs.writeFile(path.join(first, '同名.md'), '第一篇');
+  await fs.writeFile(path.join(second, '同名.md'), '第二篇');
+  const workspace = new WorkspaceFiles();
+  const left = await workspace.openFolder(first), right = await workspace.openFolder(second);
+  assert.equal((await workspace.read('同名.md', left.path)).content, '第一篇');
+  assert.equal((await workspace.read('同名.md', right.path)).content, '第二篇');
+  const created = await workspace.createMarkdown('', '明确目录', left.path);
+  assert.equal(created.path, path.join(first, '明确目录.md'));
+  await assert.rejects(fs.stat(path.join(second, '明确目录.md')), { code: 'ENOENT' });
+});
+
+test('目录上下文只允许已经打开的目录，仍拒绝越界读取', async () => {
+  const root = await fixture(), first = path.join(root, '允许'), other = path.join(root, '未打开');
+  await fs.mkdir(first); await fs.mkdir(other);
+  await fs.writeFile(path.join(other, '文档.md'), '不能读取');
+  const workspace = new WorkspaceFiles(); await workspace.openFolder(first);
+  await assert.rejects(workspace.read('文档.md', other), /请先打开这个文件夹/);
+  await assert.rejects(workspace.read('../未打开/文档.md', first), /当前文件夹/);
+});
+
+test('定位外部打开文件的父目录后，保存仍使用该目录的文件身份', async () => {
+  const root = await fixture(), target = path.join(root, '文档.md'); await fs.writeFile(target, '原文');
+  const workspace = new WorkspaceFiles(), file = await workspace.readAbsolute(target);
+  const folder = await workspace.folderForFile(file.key);
+  assert.equal(folder.path, root); assert.ok(folder.entries.some(entry => entry.id === '文档.md'));
+  const saved = await workspace.save(file.key, '修改', file.revision);
+  assert.equal(saved.root, root); assert.equal(saved.id, '文档.md');
+});

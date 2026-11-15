@@ -14,10 +14,9 @@
 <body>
   <header class="app-header">
     <div class="brand"><span class="logo">M</span><strong>SuperMarkdown</strong></div>
-    <div class="file-actions"><button id="new-document" title="新建 Ctrl+N">新建</button><button id="open-file" title="打开 Ctrl+O">打开</button><button id="save-file" title="保存 Ctrl+S">保存</button><button id="save-as" title="另存为 Ctrl+Shift+S">另存为</button></div>
     <div id="mode-controls" class="mode-switch" aria-label="编辑模式">
-      <button id="visual-mode" aria-pressed="true">可视编辑</button>
-      <button id="source-mode" aria-pressed="false">源码</button>
+      <button id="visual-mode" aria-pressed="true" title="切换可视编辑 Ctrl+Shift+M">可视编辑</button>
+      <button id="source-mode" aria-pressed="false" title="切换源码 Ctrl+Shift+M">源码</button>
     </div>
     <span id="text-mode-label" class="badge" hidden>纯文本</span>
   </header>
@@ -38,9 +37,13 @@
     </aside>
     <main>
       <div id="tabs" class="document-tabs" aria-label="打开的文档"></div>
-      <section class="intro"><strong id="editor-title">开始写作</strong><span id="editor-hint">新建文档，或打开本地文件和文件夹。</span></section>
-      <div class="actions"><button id="undo">↶ 撤销</button><button id="redo">↷ 重做</button><span>Ctrl+Z / Ctrl+Y</span><span id="mode-shortcut" class="shortcut">切换模式 Ctrl+Shift+M</span></div>
-      <div class="layout-bar"><label for="layout-mode">显示布局</label><select id="layout-mode"><option value="single">单文件</option><option value="files">双文件并排</option><option value="sync">预览 + 源码同步</option></select><span id="layout-hint"></span></div>
+      <div id="document-toolbar" class="document-toolbar" aria-label="文档操作">
+        <div class="document-identity"><strong id="editor-title">开始写作</strong><span id="editor-hint">新建文档，或打开本地文件和文件夹。</span></div>
+        <div class="file-actions"><button id="new-document" title="新建 Ctrl+N">新建</button><button id="open-file" title="打开 Ctrl+O">打开</button><button id="save-file" title="保存 Ctrl+S">保存</button><button id="save-as" title="另存为 Ctrl+Shift+S">另存为</button></div>
+        <div class="history-actions"><button id="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button id="redo" aria-label="重做" title="重做 Ctrl+Y">↷</button></div>
+        <div class="layout-controls"><label for="layout-mode">显示布局</label><select id="layout-mode"><option value="single">单文件</option><option value="files">双文件并排</option><option value="sync">预览 + 源码同步</option></select></div>
+        <span id="mode-shortcut" class="sr-only">切换模式 Ctrl+Shift+M</span><span id="layout-hint" class="sr-only"></span>
+      </div>
       <div class="editor-area" id="editors" data-layout="single">
         <section id="left-pane" class="editor-pane active-pane"><div class="pane-heading" hidden><span id="left-pane-name">左侧</span></div><div class="pane-content"><div id="empty-state" hidden>从左侧选择文件，或打开一个本地文件夹开始。</div><div id="rich"></div><textarea id="source" aria-label="Markdown 源码" spellcheck="false" hidden></textarea></div></section>
         <div id="pane-divider" role="separator" aria-label="调整左右正文宽度" aria-orientation="vertical" aria-controls="left-pane right-pane" tabindex="0" title="拖动调整左右宽度，双击恢复等宽"></div>

@@ -26,7 +26,7 @@ function decodeText(bytes, partial = false) {
 }
 
 class WorkspaceFiles {
-  constructor() { this.openedFiles = new Map(); }
+  constructor() { this.openedFiles = new Map(); this.knownRoots = new Set(); }
   async openFolder(folderPath) {
     const root = await fs.realpath(folderPath);
     if (!(await fs.stat(root)).isDirectory()) throw new Error('请选择一个文件夹。');
@@ -34,13 +34,14 @@ class WorkspaceFiles {
     nextWorkspace.root = root;
     const entries = await nextWorkspace.list('');
     this.root = root;
+    this.knownRoots.add(root);
     return { name: path.basename(root) || root, path: root, entries };
   }
 
-  async resolve(id) {
-    if (!this.root) throw new Error('请先打开文件夹。');
+  async resolve(id, root = this.root) {
+    if (!root) throw new Error('请先打开文件夹。');
+    if (root !== this.root && !this.knownRoots.has(root)) throw new Error('请先打开这个文件夹。');
     if (typeof id !== 'string' || id.includes('\0') || path.isAbsolute(id)) throw new Error('文件路径无效。');
-    const root = this.root;
     const fullPath = await fs.realpath(path.resolve(root, id));
     const relative = path.relative(root, fullPath);
     if (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
@@ -49,8 +50,8 @@ class WorkspaceFiles {
     return { root, fullPath, id: relative.split(path.sep).join('/') };
   }
 
-  async list(id) {
-    const { root, fullPath } = await this.resolve(id);
+  async list(id, scope) {
+    const { root, fullPath } = await this.resolve(id, scope);
     const entries = await fs.readdir(fullPath, { withFileTypes: true });
     const result = [];
     let next = 0;
@@ -78,19 +79,19 @@ class WorkspaceFiles {
     return result.sort((a, b) => (a.type === b.type ? 0 : a.type === 'directory' ? -1 : 1) || a.name.localeCompare(b.name, 'zh-CN', { numeric: true }));
   }
 
-  async read(id) {
-    const entry = await this.resolve(id);
+  async read(id, scope) {
+    const entry = await this.resolve(id, scope);
     return this.readAbsolute(entry.fullPath, entry.root);
   }
 
-  async createMarkdown(directoryId, name) {
+  async createMarkdown(directoryId, name, scope) {
     if (typeof name !== 'string' || !name.trim()) throw new Error('请输入文件名。');
     let filename = name.trim();
     if (/[<>:"/\\|?*\u0000-\u001F]/.test(filename) || /[. ]$/.test(filename) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(filename)) {
       throw new Error('文件名包含不支持的字符或保留名称。');
     }
     if (!/\.md$/i.test(filename)) filename += '.md';
-    const directory = await this.resolve(directoryId);
+    const directory = await this.resolve(directoryId, scope);
     if (!(await fs.stat(directory.fullPath)).isDirectory()) throw new Error('请选择一个文件夹。');
     const fullPath = path.join(directory.fullPath, filename);
     const handle = await fs.open(fullPath, 'wx');
@@ -102,6 +103,13 @@ class WorkspaceFiles {
     const file = this.openedFiles.get(key);
     if (!file) throw new Error('请先打开这个文件。');
     return file;
+  }
+
+  async folderForFile(key) {
+    const file = this.knownFile(key);
+    const folder = await this.openFolder(path.dirname(file.path));
+    file.root = folder.path;
+    return folder;
   }
 
   async save(key, content, revision) {

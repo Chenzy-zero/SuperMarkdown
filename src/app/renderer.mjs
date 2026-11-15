@@ -8,6 +8,7 @@ import { bindToolbarTooltip } from './toolbar-tooltip.mjs';
 import { runLayoutChecks } from './layout-checks.mjs';
 import { bindPaneDivider } from './pane-divider.mjs';
 import { runStorageChecks } from './storage-checks.mjs';
+import { bindFileDrop } from './file-drop.mjs';
 window.runPrototypeUXChecks = runUXChecks;
 window.runPrototypeWorkspaceChecks = runWorkspaceChecks;
 window.runPrototypeLayoutChecks = runLayoutChecks;
@@ -41,6 +42,7 @@ let linkAnchor = null;
 let linkPoint = null;
 let linkSequence = 0;
 let closingTabs = false;
+let closingCompletion = Promise.resolve();
 let resolveCloseDialog = null;
 let resolveConflict = null;
 let recoveryReady = !startup.drafts.length && !startup.recoveryError;
@@ -51,6 +53,8 @@ let secondary = null;
 let activePane = 'left';
 let layout = 'single';
 let newFileDirectory = '';
+let newFileRoot = null;
+const droppedRequests = [];
 let newFileSide = 'left';
 const source = $('source');
 const doc = () => documents[activeIndex];
@@ -124,9 +128,9 @@ function moveFileRight(key) {
   focusPane('right'); secondary?.focus(); updateUI();
 }
 
-function promptNewMarkdown(directoryId = '') {
+function promptNewMarkdown(directoryId = '', scope = rootFolder?.path) {
   if (!rootFolder) { showError(new Error('请先打开工作文件夹。')); return; }
-  newFileDirectory = directoryId; newFileSide = activePane;
+  newFileDirectory = directoryId; newFileSide = activePane; newFileRoot = scope;
   $('new-file-title').textContent = `新建 Markdown · ${directoryId || rootFolder.name}`;
   $('new-file-name').value = '未命名.md'; $('new-file-error').textContent = '';
   $('new-file-dialog').showModal(); $('new-file-name').focus(); $('new-file-name').select();
@@ -146,13 +150,13 @@ function showFileMenu(event, entry) {
   event.preventDefault(); event.stopPropagation(); $('tab-menu').hidden = true;
   const directoryId = entry.type === 'directory' ? entry.id : entry.id.split('/').slice(0, -1).join('/');
   const actions = entry.type === 'file' ? [
-    ['打开', () => openWorkspaceFile(entry.id)],
-    ['在右侧打开', () => openWorkspaceFile(entry.id, 'right')],
+    ['打开', () => openWorkspaceFile(entry.id, 'left', entry.root)],
+    ['在右侧打开', () => openWorkspaceFile(entry.id, 'right', entry.root)],
   ] : [];
   actions.push(
-    ['新建 Markdown 文件', () => promptNewMarkdown(directoryId)],
-    ['复制完整路径', () => window.workspaceFiles.entryAction({ action: 'copy-path', id: entry.id }).then(unwrap)],
-    ['在文件夹中显示', () => window.workspaceFiles.entryAction({ action: 'reveal', id: entry.id }).then(unwrap)],
+    ['新建 Markdown 文件', () => promptNewMarkdown(directoryId, entry.root || rootFolder?.path)],
+    ['复制完整路径', () => window.workspaceFiles.entryAction({ action: 'copy-path', id: entry.id, root: entry.root || rootFolder?.path }).then(unwrap)],
+    ['在文件夹中显示', () => window.workspaceFiles.entryAction({ action: 'reveal', id: entry.id, root: entry.root || rootFolder?.path }).then(unwrap)],
     ['刷新目录', refreshFolder],
   );
   const menu = $('file-menu');
@@ -234,9 +238,17 @@ function acceptFile(file, side = 'left') {
   if (index < 0) {
     index = documents.length;
     documents.push(createDocument(file.name, file.content, file.kind, file.key, file));
+  } else if (documents[index].file) {
+    documents[index].file = { ...documents[index].file, root: file.root, id: file.id };
   }
   if (side === 'right') moveFileRight(file.key); else selectDocument(index, { forceLeft: true });
   return index;
+}
+
+function acceptExternal(result, side = 'left') {
+  if (result.folder) applyFolder(result.folder);
+  if (result.file) acceptFile(result.file, side);
+  if (result.error || result.folderError) showError(new Error(result.error || result.folderError));
 }
 
 async function drainOpenFiles() {
@@ -246,11 +258,8 @@ async function drainOpenFiles() {
   try {
     do {
       incomingScheduled = false;
-      const results = unwrap(await window.workspaceFiles.takeOpenFiles());
-      for (const result of results) {
-        if (result.file) acceptFile(result.file);
-        else if (result.error) showError(new Error(result.error));
-      }
+      const results = [...droppedRequests.splice(0), ...unwrap(await window.workspaceFiles.takeOpenFiles())];
+      for (const result of results) acceptExternal(result, result.side || 'left');
       if (results.length) incomingScheduled = true;
     } while (incomingScheduled && !document.querySelector('dialog[open]'));
   } catch (error) { showError(error); } finally { incomingBusy = false; }
@@ -292,7 +301,7 @@ function newDocument() {
   documents.push(item); selectDocument(documents.length - 1, { forceLeft: true });
 }
 async function openFile() {
-  try { const file = unwrap(await window.workspaceFiles.openFile()); if (file) acceptFile(file); } catch (error) { showError(error); }
+  try { const result = unwrap(await window.workspaceFiles.openFile()); if (result) { droppedRequests.push(result); await drainOpenFiles(); } } catch (error) { showError(error); }
 }
 function askConflict(item) {
   if (resolveConflict || document.querySelector('dialog[open]')) return Promise.resolve('cancel');
@@ -405,12 +414,14 @@ function finishCloseDialog(action) {
 }
 
 async function closeDocuments(keys) {
-  if (closingTabs) return false;
+  if (closingTabs) { await closingCompletion; return closeDocuments(keys); }
   capture(); secondary?.capture();
   const requested = new Set(keys);
   const targets = documents.filter(item => requested.has(item.key));
   if (!targets.length) return true;
   closingTabs = true;
+  let finishClosing;
+  closingCompletion = new Promise(resolve => { finishClosing = resolve; });
   try {
     const dirty = targets.filter(isDirty);
     if (dirty.length) {
@@ -435,7 +446,7 @@ async function closeDocuments(keys) {
       $('layout-mode').value = layout; $('editors').dataset.layout = layout;
     }
     mode = doc()?.mode || 'visual'; render(); await flushRecovery(); return true;
-  } finally { closingTabs = false; }
+  } finally { closingTabs = false; finishClosing(); }
 }
 
 function showTabMenu(event, key) {
@@ -468,7 +479,7 @@ function showTabMenu(event, key) {
   menu.querySelector('button:not(:disabled)').focus();
 }
 
-function renderTree(entries, container) {
+function renderTree(entries, container, scope = rootFolder?.path) {
   container.replaceChildren(...entries.map(entry => {
     if (entry.type === 'directory') {
       const details = document.createElement('details');
@@ -481,8 +492,8 @@ function renderTree(entries, container) {
       let pending = null;
       details.loadChildren = () => {
         if (loaded) return Promise.resolve();
-        if (!pending) pending = window.workspaceFiles.list(entry.id).then(unwrap).then(nested => {
-          renderTree(nested, children); loaded = true;
+        if (!pending) pending = window.workspaceFiles.list(entry.id, scope).then(unwrap).then(nested => {
+          renderTree(nested, children, scope); loaded = true;
         }).finally(() => { pending = null; });
         return pending;
       };
@@ -491,15 +502,15 @@ function renderTree(entries, container) {
         try { await details.loadChildren(); } catch (error) { showError(error); }
       });
       details.append(summary, children);
-      summary.oncontextmenu = event => showFileMenu(event, entry);
+      summary.oncontextmenu = event => showFileMenu(event, { ...entry, root: scope });
       return details;
     }
     const button = document.createElement('button');
     button.textContent = `▤  ${entry.name}`;
     button.title = entry.id;
     button.dataset.fileId = entry.id;
-    button.onclick = () => openWorkspaceFile(entry.id).catch(showError);
-    button.oncontextmenu = event => showFileMenu(event, entry);
+    button.onclick = () => openWorkspaceFile(entry.id, 'left', scope).catch(showError);
+    button.oncontextmenu = event => showFileMenu(event, { ...entry, root: scope });
     return button;
   }));
   if (!entries.length) {
@@ -529,9 +540,9 @@ function applyFolder(folder) {
   updateUI();
 }
 
-async function openWorkspaceFile(id, side = 'left') {
+async function openWorkspaceFile(id, side = 'left', scope = rootFolder?.path) {
   const request = ++openRequest;
-  const file = unwrap(await window.workspaceFiles.read(id));
+  const file = unwrap(await window.workspaceFiles.read(id, scope));
   if (request !== openRequest) return -1;
   return acceptFile(file, side);
 }
@@ -540,7 +551,9 @@ async function refreshFolder() {
   if (!rootFolder) return;
   $('refresh-folder').disabled = true;
   try {
-    renderTree(unwrap(await window.workspaceFiles.list('')), $('file-tree'));
+    const scope = rootFolder.path;
+    const entries = unwrap(await window.workspaceFiles.list('', scope));
+    if (rootFolder.path === scope) renderTree(entries, $('file-tree'), scope);
     updateUI();
   } catch (error) { showError(error); }
   finally { $('refresh-folder').disabled = false; }
@@ -636,6 +649,8 @@ function updateUI() {
   $('mode-shortcut').hidden = plainText || !active || layout === 'sync';
   $('editor-title').textContent = active?.name || '开始写作';
   $('editor-hint').textContent = active?.file?.path || '新建文档，或打开本地文件和文件夹。';
+  $('editor-hint').title = $('editor-hint').textContent;
+  $('editor-title').title = active?.file?.path || active?.name || '';
   $('visual-mode').setAttribute('aria-pressed', String(viewMode === 'visual'));
   $('source-mode').setAttribute('aria-pressed', String(viewMode === 'source'));
   $('undo').disabled = !active?.history.canUndo;
@@ -652,6 +667,7 @@ function updateUI() {
   $('left-pane').classList.toggle('active-pane', activePane === 'left');
   $('right-pane').classList.toggle('active-pane', activePane === 'right');
   $('layout-hint').textContent = layout === 'sync' ? '同一文档，左右均可编辑，内容同步' : layout === 'files' ? '点击左侧或右侧正文选择当前编辑区域' : '';
+  $('layout-mode').title = $('layout-hint').textContent || '选择正文显示布局';
   $('word-count').textContent = active ? `${active.history.current.markdown.length.toLocaleString()} 字符` : '';
   for (const id of ['examples', 'tabs']) {
     $(id).replaceChildren(...documents.flatMap((item, i) => {
@@ -866,7 +882,7 @@ $('new-file-form').onsubmit = async event => {
   const submit = $('new-file-form').querySelector('[type="submit"]'); submit.disabled = true;
   $('new-file-cancel').disabled = true;
   try {
-    const file = unwrap(await window.workspaceFiles.createMarkdown({ directoryId: newFileDirectory, name: $('new-file-name').value }));
+    const file = unwrap(await window.workspaceFiles.createMarkdown({ directoryId: newFileDirectory, name: $('new-file-name').value, root: newFileRoot }));
     await refreshFolder(); await revealTreeEntry(file.id);
     $('new-file-dialog').close(); acceptFile(file, newFileSide);
   } catch (error) { $('new-file-error').textContent = error.message; }
@@ -882,6 +898,14 @@ for (const side of ['left', 'right']) {
 }
 bindToolbarTooltip();
 bindPaneDivider();
+bindFileDrop({
+  getActiveSide: () => layout === 'files' ? activePane : 'left', onError: showError,
+  openFiles: async (files, side) => {
+    const results = unwrap(await window.workspaceFiles.openDroppedFiles(files));
+    droppedRequests.push(...results.map(result => ({ ...result, side })));
+    await drainOpenFiles();
+  },
+});
 for (const [id, files] of [['files-tab', true], ['outline-tab', false]]) {
   $(id).onclick = () => {
     $('files').hidden = !files; $('outline').hidden = files;

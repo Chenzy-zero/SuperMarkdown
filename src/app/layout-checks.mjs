@@ -81,7 +81,7 @@ export async function runLayoutChecks() {
   remaining.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 400, clientY: 90 }));
   [...$('tab-menu').querySelectorAll('button')].find(node => node.textContent === '关闭全部标签页').click();
   if ($('close-confirm').open) $('close-discard').click();
-  await wait(30);
+  await until(() => document.querySelectorAll('#tabs .document-tab').length === 0);
   check('没有标签页时 Ctrl+W 保留可继续打开文件的窗口', closeShortcut() && document.querySelectorAll('#tabs .document-tab').length === 0 && !$('empty-state').hidden);
   file('README.MD').click(); await until(() => Boolean(tab('README.MD'))); layout('sync');
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));

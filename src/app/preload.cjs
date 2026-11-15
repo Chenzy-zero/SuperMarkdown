@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('workspaceFiles', {
   startup: () => ipcRenderer.invoke('application:startup'),
@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('workspaceFiles', {
   onFilesPending: callback => ipcRenderer.on('application:files-pending', () => callback()),
   openDefaultApps: () => ipcRenderer.invoke('application:default-apps'),
   openFile: () => ipcRenderer.invoke('workspace:open-file'),
+  openDroppedFiles: files => ipcRenderer.invoke('workspace:open-dropped', Array.from(files, file => webUtils.getPathForFile(file)).filter(Boolean)),
   save: request => ipcRenderer.invoke('workspace:save', request),
   saveAs: request => ipcRenderer.invoke('workspace:save-as', request),
   inspect: key => ipcRenderer.invoke('workspace:inspect', key),
@@ -15,8 +16,8 @@ contextBridge.exposeInMainWorld('workspaceFiles', {
   approveClose: () => ipcRenderer.invoke('application:close-approved'),
   testFiles: request => ipcRenderer.invoke('testing:files', request),
   chooseFolder: () => ipcRenderer.invoke('workspace:choose-folder'),
-  list: id => ipcRenderer.invoke('workspace:list', id),
-  read: id => ipcRenderer.invoke('workspace:read', id),
+  list: (id, root) => ipcRenderer.invoke('workspace:list', id, root),
+  read: (id, root) => ipcRenderer.invoke('workspace:read', id, root),
   createMarkdown: request => ipcRenderer.invoke('workspace:create-markdown', request),
   entryAction: request => ipcRenderer.invoke('workspace:entry-action', request),
   describeLink: request => ipcRenderer.invoke('workspace:describe-link', request),

@@ -27,12 +27,13 @@ async function connect(port) {
     const result = JSON.parse(event.data); if (!result.id) return;
     const request = pending.get(result.id); pending.delete(result.id);
     if (result.error || result.result?.exceptionDetails) request?.reject(new Error(JSON.stringify(result.error || result.result.exceptionDetails)));
-    else request?.resolve(result.result?.result?.value);
+    else request?.resolve(result.result);
   };
-  return { close: () => socket.close(), evaluate: expression => new Promise((resolve, reject) => {
+  const send = (method, params) => new Promise((resolve, reject) => {
     const id = ++sequence; pending.set(id, { resolve, reject });
-    socket.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }));
-  }) };
+    socket.send(JSON.stringify({ id, method, params }));
+  });
+  return { close: () => socket.close(), send, evaluate: expression => send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }).then(result => result.result?.value) };
 }
 
 (async () => {
@@ -42,6 +43,14 @@ async function connect(port) {
   const first = path.join(fixtures, '首个 文档.md'), second = path.join(fixtures, '第二个 文档.MD');
   await fs.writeFile(first, '# 首个文件标题\n\n首个文件正文。\n');
   await fs.writeFile(second, '# 第二个文件标题\n\n第二个文件正文。\n');
+  await fs.writeFile(path.join(fixtures, '同级说明.txt'), '同级文本文件原样打开。\n');
+  await fs.writeFile(path.join(fixtures, '同级代码.js'), 'const sibling = true;\n');
+  const leftFolder = path.join(directory, '左侧目录'), rightFolder = path.join(directory, '右侧目录');
+  await fs.mkdir(leftFolder); await fs.mkdir(rightFolder);
+  const droppedLeft = path.join(leftFolder, '拖入左侧.md'), droppedRight = path.join(rightFolder, '拖入右侧.md');
+  const droppedExtra = path.join(leftFolder, '第二篇拖入.md');
+  await fs.writeFile(droppedLeft, '# 拖入左侧正文\n'); await fs.writeFile(droppedRight, '# 拖入右侧正文\n');
+  await fs.writeFile(droppedExtra, '# 多文件拖入正文\n');
   const profile = path.join(directory, 'profile'), port = await freePort();
   const args = [...entry, `--user-data-dir=${profile}`, '--file-opening-check'];
   const child = spawn(executable, [...args, `--remote-debugging-port=${port}`, first], { env, cwd: fixtures, windowsHide: true, stdio: 'ignore' });
@@ -50,6 +59,15 @@ async function connect(port) {
     client = await connect(port);
     const visibleHeading = title => client.evaluate(`document.querySelector('#rich:not([hidden]) h1')?.textContent === ${JSON.stringify(title)}`);
     check('冷启动接收中文及空格文件路径，并显示实际 Markdown 内容', await until(() => visibleHeading('首个文件标题')));
+    check('系统打开文档后侧栏展示所在目录和所有同级文本', await until(() => client.evaluate(`document.getElementById('folder-name').title === ${JSON.stringify(fixtures)} && ['首个 文档.md','第二个 文档.MD','同级说明.txt','同级代码.js'].every(name => [...document.querySelectorAll('#file-tree [data-file-id]')].some(node => node.dataset.fileId === name))`)));
+    const hasSibling = await client.evaluate(`Boolean(document.querySelector('#file-tree [data-file-id="同级说明.txt"]'))`);
+    if (hasSibling) {
+      await client.evaluate(`document.querySelector('#file-tree [data-file-id="同级说明.txt"]').click()`);
+      check('侧栏可切换同级非 Markdown 文件并以纯文本显示', await until(() => client.evaluate(`!document.getElementById('source').hidden && document.getElementById('source').value.includes('同级文本文件原样打开')`)));
+      await client.evaluate(`document.querySelector('#tabs [aria-label="关闭 同级说明.txt"]').click()`);
+      await until(() => client.evaluate(`document.querySelectorAll('#tabs .document-tab').length === 1`));
+    } else check('侧栏可切换同级非 Markdown 文件并以纯文本显示', false);
+    check('文件信息和新建打开保存、撤销重做、布局合并为一行', await client.evaluate(`(() => { const ids=['editor-title','save-file','undo','layout-mode']; const nodes=ids.map(id=>document.getElementById(id)); return nodes.every(node=>node.closest('#document-toolbar')) && Math.max(...nodes.map(node=>{const r=node.getBoundingClientRect();return r.top+r.height/2}))-Math.min(...nodes.map(node=>{const r=node.getBoundingClientRect();return r.top+r.height/2})) < 3; })()`));
     await client.evaluate(`(() => {
       if (!document.querySelector('#tabs .tab-select')) document.getElementById('new-document').click();
       document.getElementById('source-mode').click();
@@ -68,6 +86,30 @@ async function connect(port) {
     check('从系统打开文件不会写回未保存的内容', (await fs.readFile(first, 'utf8')) === '# 首个文件标题\n\n首个文件正文。\n');
     await launch(path.join(fixtures, '已删除 文件.md'));
     check('系统请求的文件不存在时保留当前文档并显示错误', await until(() => client.evaluate(`document.querySelectorAll('#tabs .document-tab').length === 2 && document.getElementById('status').textContent.includes('已删除 文件.md')`)));
+    await client.evaluate(`document.getElementById('layout-mode').value='files'; document.getElementById('layout-mode').dispatchEvent(new Event('change'))`);
+    const drop = async (side, files) => {
+      const point = await client.evaluate(`(() => {const r=document.querySelector('#${side}-pane .pane-content').getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+Math.min(100,r.height/2)}})()`);
+      const data = { items: [], files, dragOperationsMask: 1 };
+      for (const type of ['dragEnter', 'dragOver']) await client.send('Input.dispatchDragEvent', { type, ...point, data });
+      const highlighted = await client.evaluate(`document.getElementById('${side}-pane').classList.contains('file-drop-target')`);
+      await client.send('Input.dispatchDragEvent', { type: 'drop', ...point, data });
+      return highlighted;
+    };
+    check('本地文件拖动时高亮接收区域', await drop('left', [droppedLeft]));
+    check('实际 OS 文件拖入左侧，打开左侧并展示所在目录', await until(() => client.evaluate(`document.querySelector('#rich:not([hidden]) h1')?.textContent === '拖入左侧正文' && document.getElementById('folder-name').title === ${JSON.stringify(leftFolder)}`)));
+    await drop('right', [droppedRight]);
+    check('拖入右侧只替换右侧文档并切换到该文件的目录', await until(() => client.evaluate(`document.querySelector('#right-rich:not([hidden]) h1')?.textContent === '拖入右侧正文' && document.querySelector('#rich h1')?.textContent === '拖入左侧正文' && document.getElementById('folder-name').title === ${JSON.stringify(rightFolder)}`)));
+    await client.evaluate(`document.getElementById('right-pane').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));document.getElementById('source-mode').click();const node=document.getElementById('right-source');node.value='# 右侧未保存修改';node.dispatchEvent(new InputEvent('input',{bubbles:true}));`);
+    const count = await client.evaluate(`document.querySelectorAll('#tabs .document-tab').length`);
+    await drop('right', [droppedRight]);
+    check('重复拖入不创建重复标签，也不覆盖该侧未保存内容', await until(() => client.evaluate(`document.querySelectorAll('#tabs .document-tab').length === ${count} && !document.getElementById('right-source').hidden && document.getElementById('right-source').value.includes('右侧未保存修改')`)));
+    await drop('left', [droppedLeft, droppedExtra]);
+    check('同时拖入多个文件，按同一侧打开并保留另一侧编辑', await until(() => client.evaluate(`document.querySelector('#rich:not([hidden]) h1')?.textContent === '多文件拖入正文' && document.getElementById('right-source').value.includes('右侧未保存修改')`)));
+    await client.send('Emulation.setDeviceMetricsOverride', { width: 880, height: 700, deviceScaleFactor: 1, mobile: false });
+    check('最小窗口宽度下工具行不换行且操作按钮完整可见', await client.evaluate(`(() => {const bar=document.getElementById('document-toolbar');if(!bar)return false;const r=bar.getBoundingClientRect();return r.height<=52 && ['new-document','open-file','save-file','save-as','undo','redo','layout-mode'].every(id=>{const b=document.getElementById(id).getBoundingClientRect();return b.left>=r.left&&b.right<=innerWidth&&b.top>=r.top&&b.bottom<=r.bottom;})})()`));
+    await client.send('Emulation.clearDeviceMetricsOverride', {});
+    const screenshot = await client.send('Page.captureScreenshot', { format: 'png' });
+    await fs.writeFile(path.join(parent, 'workspace-dragging.png'), Buffer.from(screenshot.data, 'base64'));
     const savedFile = await client.evaluate(`window.workspaceFiles.inspect(${JSON.stringify(process.platform === 'win32' ? first.toLowerCase() : first)})`);
     await client.evaluate('window.workspaceFiles.writeRecovery([]).then(() => window.workspaceFiles.approveClose())').catch(() => {}); client.close(); client = null;
     if (!await until(() => child.exitCode !== null, 3000)) throw new Error('测试窗口未结束。');
