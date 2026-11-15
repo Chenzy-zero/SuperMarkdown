@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { WorkspaceFiles } = require('./workspace-files.cjs');
 const { RecoveryStore, diskRevision } = require('./file-persistence.cjs');
+const { pathsFromArguments, FileOpenQueue } = require('./open-files.cjs');
 const uxVerify = process.argv.includes('--ux-verify');
 const recoveryPrepare = process.argv.includes('--recovery-prepare');
 const recoveryVerify = process.argv.includes('--recovery-verify');
@@ -11,10 +12,23 @@ const verify = process.argv.includes('--verify') || uxVerify || recoveryPrepare 
 app.setName('SuperMarkdown');
 const artifacts = verify && process.env.SUPERMARKDOWN_VERIFY_OUTPUT ? path.resolve(process.env.SUPERMARKDOWN_VERIFY_OUTPUT) :
   app.isPackaged ? path.join(app.getPath('userData'), 'verification') : path.resolve(__dirname, '../../.prototype-artifacts');
-if (!app.isPackaged || verify) app.setPath('userData', path.join(artifacts, verify ? 'verify-profile' : 'profile'));
+if ((!app.isPackaged && !app.commandLine.hasSwitch('user-data-dir')) || verify) app.setPath('userData', path.join(artifacts, verify ? 'verify-profile' : 'profile'));
 app.setAppUserModelId('local.supermarkdown.prototype');
 app.disableHardwareAcceleration();
-const ownsInstance = verify || app.requestSingleInstanceLock();
+let appWindow, workspace;
+const requestedFiles = pathsFromArguments(process.argv, process.cwd(), app.isPackaged);
+const opening = new FileOpenQueue(filename => workspace.readAbsolute(filename), () => {
+  if (appWindow && !appWindow.isDestroyed()) appWindow.webContents.send('application:files-pending');
+});
+opening.add(requestedFiles);
+app.on('second-instance', (_event, commandLine, workingDirectory, additionalData) => {
+  opening.add(Array.isArray(additionalData?.files) ? additionalData.files : pathsFromArguments(commandLine, workingDirectory, app.isPackaged));
+  if (appWindow && !appWindow.isDestroyed() && !process.argv.includes('--file-opening-check')) {
+    if (appWindow.isMinimized()) appWindow.restore(); appWindow.show(); appWindow.focus();
+  }
+});
+app.on('open-file', (event, filename) => { event.preventDefault(); opening.add([filename]); });
+const ownsInstance = verify || app.requestSingleInstanceLock({ files: requestedFiles });
 if (!ownsInstance) app.quit();
 
 app.whenReady().then(async () => {
@@ -29,11 +43,11 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   const window = new BrowserWindow({
     width: 1320, height: 940, minWidth: 880, minHeight: 620,
-    show: !verify, backgroundColor: '#f6f7f5', title: 'SuperMarkdown',
+    show: !verify && !process.argv.includes('--file-opening-check'), backgroundColor: '#f6f7f5', title: 'SuperMarkdown',
     webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, backgroundThrottling: false, preload: path.join(__dirname, 'preload.cjs') },
   });
-  app.on('second-instance', () => { if (window.isMinimized()) window.restore(); window.show(); window.focus(); });
-  const workspace = new WorkspaceFiles();
+  appWindow = window;
+  workspace = new WorkspaceFiles();
   const recovery = new RecoveryStore(app.getPath('userData'));
   if (verify && !recoveryVerify) await recovery.write([]);
   let recovered = [], recoveryError = '';
@@ -76,6 +90,11 @@ app.whenReady().then(async () => {
     return workspace.openFolder(result.filePaths[0]);
   });
   handle('application:startup', () => ({ verify: verify && !startupVerify, drafts: recovered, recoveryError }));
+  handle('application:take-open-files', () => opening.take());
+  handle('application:default-apps', async () => {
+    if (!verify) await shell.openExternal('ms-settings:defaultapps');
+    return { ok: true };
+  });
   handle('workspace:open-file', async () => {
     const result = verify ? { canceled: false, filePaths: [path.join(fixtureRoot, 'README.MD')] } :
       await dialog.showOpenDialog(window, { title: '打开文本文件', properties: ['openFile'], filters: [{ name: '文本文件', extensions: ['md', 'txt', '*'] }] });

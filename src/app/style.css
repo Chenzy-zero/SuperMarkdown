@@ -24,6 +24,7 @@ aside { width: 224px; flex-shrink: 0; background: #f0f3ee; border-right: 1px sol
 nav button { display: block; width: 100%; text-align: left; margin-bottom: 4px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 nav .active { background: #dfe9df; color: #285c3e; }
 .sidebar-note { color: #7b877b; font-size: 11px; line-height: 1.8; margin: 16px 12px 0; flex-shrink: 0; }
+.default-markdown { font-size: 12px; text-align: left; color: #377254; margin-top: 12px; flex-shrink: 0; }
 #files, #outline { flex: 1; min-height: 0; overflow-y: auto; }
 .open-folder { width: 100%; text-align: left; background: #e0eade; color: #2b623f; font-size: 12px; }
 .refresh-folder { font-size: 11px; margin: 4px 0 12px; }

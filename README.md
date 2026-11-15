@@ -1,6 +1,6 @@
 # SuperMarkdown
 
-面向 Windows 的 Markdown 可视编辑器。应用源码位于 `src/app/`，目前版本为 **0.2.0**。
+面向 Windows 的 Markdown 可视编辑器。应用源码位于 `src/app/`，目前版本为 **0.2.1**。
 
 当前已完成新建、打开、编辑、保存、另存为、关闭保护及未保存草稿恢复的文件操作闭环。图片资源管理、查找替换和更完整的 Markdown/输入法兼容性仍在后续范围内。
 
@@ -9,10 +9,15 @@
 从 [GitHub Releases](https://github.com/Chenzy-zero/SuperMarkdown/releases) 下载 Windows x64 安装包或 ZIP。解压版需要完整解压后运行 `SuperMarkdown.exe`，不需要 Node.js、pnpm 或额外的 Electron。
 
 - [0.2.0 版本说明](docs/releases/0.2.0.md)
+- [0.2.1 文件关联修复](docs/releases/0.2.1.md)
 - [文件保存与恢复说明](docs/saving-and-recovery.md)
 - 历史 `v0.1.0` 是不支持正文保存的验证版本；升级前请先复制保留旧窗口中的内容。
 
 已准备好的源码目录可双击 [启动SuperMarkdown.cmd](启动SuperMarkdown.cmd)。旧窗口不会自动加载源代码修改。
+
+安装版会注册 `.md`、`.markdown`、`.mdown`、`.mkd`。安装完成页可打开 Windows 默认应用设置；应用左下方也提供“设置 Markdown 默认打开方式”。在系统设置中搜索 `.md` 并选择 SuperMarkdown，或右键 Markdown 文件 → 打开方式 → 选择其他应用 → SuperMarkdown → 始终。
+
+Windows 要求通过系统界面确认默认应用，安装程序不能绕过已有的用户选择。设置后双击文档会直接打开对应内容；软件已运行时会在同一窗口中新开标签，重复打开同一文件会保留已有未保存修改。ZIP 版不执行安装注册，可通过系统“打开方式”选择解压后的 `SuperMarkdown.exe`。
 
 ## 常用操作
 
@@ -62,6 +67,7 @@ pnpm test
 pnpm test:app
 pnpm test:startup
 pnpm test:recovery
+pnpm test:opening
 pnpm dist:win
 ```
 
@@ -69,6 +75,7 @@ pnpm dist:win
 - `test:app`：真实 Electron 编辑器的完整界面回归，报告和截图写入 `.prototype-artifacts/`。
 - `test:startup`：正常空白工作区的新建与保存路径。
 - `test:recovery`：先结束一个留下未保存内容的进程，再启动第二个进程验证恢复。
+- `test:opening`：通过真实命令行和第二个进程验证文件关联打开路径、中文与空格路径、重复打开保护、文件不存在及恢复草稿时的请求排队。
 - `dist:win`：使用 electron-builder 26.18.0 生成 `dist/` 下的 x64 NSIS 安装包及 ZIP，首次构建需要下载 NSIS 等工具。
 
 以上检查使用项目内的临时样本，不操作用户文档。原生文件选择/保存对话框使用固定样本替代，仍需人工检查真实对话框体验。`启动SuperMarkdown.cmd --verify` 可通过不依赖 pnpm 的入口执行界面回归。
@@ -79,6 +86,7 @@ pnpm dist:win
 $env:SUPERMARKDOWN_VERIFY_OUTPUT = Join-Path $PWD '.prototype-artifacts/packaged'
 Start-Process '.\dist\win-unpacked\SuperMarkdown.exe' '--ux-verify' -Wait
 node tools/check-recovery.cjs (Join-Path $PWD 'dist/win-unpacked/SuperMarkdown.exe')
+node tools/check-file-opening.cjs (Join-Path $PWD 'dist/win-unpacked/SuperMarkdown.exe')
 ```
 
 发布包自带依赖和第三方许可文件，应用设置和草稿写入用户数据目录。安装包尚未进行代码签名。

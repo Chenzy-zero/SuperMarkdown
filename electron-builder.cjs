@@ -5,6 +5,7 @@ module.exports = {
   electronDist: 'node_modules/electron/dist',
   asar: true,
   npmRebuild: false,
+  fileAssociations: [{ ext: ['md', 'markdown', 'mdown', 'mkd'], name: 'SuperMarkdown.Markdown', description: 'Markdown 文档', role: 'Editor', icon: 'icon.ico' }],
   files: ['src/app/**/*', 'README.md', 'docs/releases/*.md'],
   win: {
     target: [{ target: 'nsis', arch: ['x64'] }, { target: 'zip', arch: ['x64'] }],
@@ -21,6 +22,7 @@ module.exports = {
     createDesktopShortcut: true,
     shortcutName: 'SuperMarkdown',
     uninstallDisplayName: 'SuperMarkdown',
+    include: 'build/installer.nsh',
   },
   publish: null,
 };

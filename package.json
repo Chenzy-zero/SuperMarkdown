@@ -1,6 +1,6 @@
 {
   "name": "supermarkdown",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "面向 Windows 的 Markdown 可视编辑器",
   "main": "src/app/main.cjs",
@@ -16,6 +16,7 @@
     "test:app": "node tools/run-prototype.cjs --ux-verify",
     "test:recovery": "node tools/check-recovery.cjs",
     "test:startup": "node tools/run-prototype.cjs --startup-verify",
+    "test:opening": "node tools/check-file-opening.cjs",
     "setup:electron": "node tools/setup-electron.cjs",
     "prototype": "node tools/run-prototype.cjs",
     "prototype:check": "node tools/run-prototype.cjs --verify",

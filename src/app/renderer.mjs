@@ -28,7 +28,7 @@ const documents = startup.verify ? [
   createDocument('内容保留样本.md', compatibility),
   createDocument('长文样本.md', suggestedScale),
 ] : [];
-let activeIndex = 0;
+let activeIndex = documents.length ? 0 : -1;
 let mode = 'visual';
 let richDirty = false;
 let sourceDirty = false;
@@ -46,6 +46,7 @@ let resolveConflict = null;
 let recoveryReady = !startup.drafts.length && !startup.recoveryError;
 let recoveryTimer = null, lastRecovery = null, recoveryFailure = startup.recoveryError || '';
 let scanning = false;
+let incomingReady = false, incomingBusy = false, incomingScheduled = false;
 let secondary = null;
 let activePane = 'left';
 let layout = 'single';
@@ -236,6 +237,23 @@ function acceptFile(file, side = 'left') {
   }
   if (side === 'right') moveFileRight(file.key); else selectDocument(index, { forceLeft: true });
   return index;
+}
+
+async function drainOpenFiles() {
+  incomingScheduled = true;
+  if (!incomingReady || incomingBusy || document.querySelector('dialog[open]')) return;
+  incomingBusy = true;
+  try {
+    do {
+      incomingScheduled = false;
+      const results = unwrap(await window.workspaceFiles.takeOpenFiles());
+      for (const result of results) {
+        if (result.file) acceptFile(result.file);
+        else if (result.error) showError(new Error(result.error));
+      }
+      if (results.length) incomingScheduled = true;
+    } while (incomingScheduled && !document.querySelector('dialog[open]'));
+  } catch (error) { showError(error); } finally { incomingBusy = false; }
 }
 
 async function activateLink(request, side = 'left') {
@@ -812,6 +830,14 @@ $('recovery-restore').onclick = () => { $('recovery-dialog').close(); restoreDra
 $('recovery-discard').onclick = () => { $('recovery-dialog').close(); recoveryReady = true; flushRecovery().catch(showError); };
 $('recovery-dialog').addEventListener('cancel', event => event.preventDefault());
 $('examples-section').hidden = !startup.verify;
+window.workspaceFiles.onFilesPending(drainOpenFiles);
+for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('close', drainOpenFiles);
+$('default-markdown').onclick = async () => {
+  try {
+    unwrap(await window.workspaceFiles.openDefaultApps());
+    $('status').textContent = '请在 Windows 默认应用中搜索 .md，选择 SuperMarkdown，并确认为默认打开方式。';
+  } catch (error) { showError(error); }
+};
 window.workspaceFiles.onCloseRequested(async () => {
   if (document.querySelector('dialog[open]') || closingTabs) return;
   try {
@@ -940,11 +966,13 @@ engine = new Vditor('rich', {
       onState: updateUI, onError: showError,
       onReady: (root, viewEngine) => bindEditorControls(root, viewEngine, () => secondary.document, 'right'),
     });
-    secondary.ready.then(() => {
+    secondary.ready.then(async () => {
+      incomingReady = true;
       if (startup.drafts.length) {
         $('recovery-message').textContent = `上次留下了 ${startup.drafts.length} 篇未保存的文档，是否恢复？`;
         $('recovery-dialog').showModal();
       } else if (startup.recoveryError) showError(new Error(startup.recoveryError));
+      await drainOpenFiles();
       resolveReady();
     });
   },

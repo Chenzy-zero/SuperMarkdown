@@ -26,6 +26,8 @@ SuperMarkdown 首先服务于开发者本人，目标是在 Windows 上直接编
 
 文件可靠性行为和实测见 [保存与恢复](saving-and-recovery.md)。图片资源管理、查找替换、完整中文输入法与更广泛的 Markdown 兼容仍未完成；不因版本打包就视作全部首版需求已经验收。项目许可证仍未确定。
 
-选型依据、实测结果与未验证项见 [技术评估](technical-evaluation.md)；原型运行及试用方式见 [原型说明](../experiments/editor-spike/README.md)。
+0.2.1 补齐安装文件关联、系统双击启动及已运行窗口中的文件转交，并提供 Windows 默认应用设置入口。
+
+选型依据、实测结果与未验证项见 [技术评估](technical-evaluation.md)；当前运行方式见 [应用说明](../src/app/README.md)。
 
 领域术语写入根目录 GLOSSARY.md，重要决策按需写入 docs/adr/。
