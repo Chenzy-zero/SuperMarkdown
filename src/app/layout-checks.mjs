@@ -83,6 +83,7 @@ export async function runLayoutChecks() {
   if ($('close-confirm').open) $('close-discard').click();
   await until(() => document.querySelectorAll('#tabs .document-tab').length === 0);
   check('没有标签页时 Ctrl+W 保留可继续打开文件的窗口', closeShortcut() && document.querySelectorAll('#tabs .document-tab').length === 0 && !$('empty-state').hidden);
+  $('choose-folder').click(); await until(() => Boolean(file('README.MD')));
   file('README.MD').click(); await until(() => Boolean(tab('README.MD'))); layout('sync');
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   await wait(100);

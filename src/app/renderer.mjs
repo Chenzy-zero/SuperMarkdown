@@ -9,11 +9,15 @@ import { runLayoutChecks } from './layout-checks.mjs';
 import { bindPaneDivider } from './pane-divider.mjs';
 import { runStorageChecks } from './storage-checks.mjs';
 import { bindFileDrop } from './file-drop.mjs';
+import { ActiveFolderFollower } from './active-folder.mjs';
 window.runPrototypeUXChecks = runUXChecks;
 window.runPrototypeWorkspaceChecks = runWorkspaceChecks;
 window.runPrototypeLayoutChecks = runLayoutChecks;
-window.runStorageChecks = () => runStorageChecks({ current: focusedDoc, documents: () => documents, isDirty,
-  setLayout, saveDocument, closeDocuments, openWorkspaceFile, flushRecovery, restoreDrafts, scanExternalFiles });
+window.runStorageChecks = () => {
+  const scope = rootFolder?.path;
+  return runStorageChecks({ current: focusedDoc, documents: () => documents, isDirty, setLayout, saveDocument, closeDocuments,
+    openWorkspaceFile: id => openWorkspaceFile(id, 'left', scope), flushRecovery, restoreDrafts, scanExternalFiles });
+};
 
 const $ = id => document.getElementById(id);
 const startup = unwrap(await window.workspaceFiles.startup());
@@ -71,8 +75,22 @@ function unwrap(result) {
 
 function showError(error) { $('status').textContent = error.message || '暂时无法打开该文件。'; }
 
+function activeFolderTarget() {
+  const item = focusedDoc();
+  return { identity: `${activePane}:${item?.key || ''}:${item?.file?.path || ''}`, key: item?.file?.key, directory: item?.file?.directory };
+}
+const folderFollower = new ActiveFolderFollower({
+  current: activeFolderTarget, root: () => rootFolder?.path,
+  load: key => window.workspaceFiles.activeFolder(key).then(unwrap),
+  align: (target, directory) => {
+    const item = focusedDoc();
+    if (item?.file?.key === target.key) item.file = { ...item.file, directory, root: directory, id: item.file.name };
+  },
+  apply: folder => applyFolder(folder, { reveal: false }), onError: showError,
+});
+
 function focusPane(side) {
-  if (side === activePane) return;
+  if (side === activePane) { folderFollower.follow(true); return; }
   if (activePane === 'right') secondary?.capture(); else capture();
   activePane = side;
   focusedDoc()?.history.closeGroup();
@@ -529,14 +547,16 @@ async function chooseFolder() {
   finally { $('choose-folder').disabled = false; }
 }
 
-function applyFolder(folder) {
+function applyFolder(folder, { reveal = true } = {}) {
   rootFolder = folder;
   $('refresh-folder').disabled = false;
   $('new-markdown').disabled = false;
   $('folder-name').textContent = folder.name; $('folder-name').title = folder.path;
   $('examples-section').open = false; renderTree(folder.entries, $('file-tree'));
-  $('files').hidden = false; $('outline').hidden = true;
-  $('files-tab').setAttribute('aria-selected', 'true'); $('outline-tab').setAttribute('aria-selected', 'false');
+  if (reveal) {
+    $('files').hidden = false; $('outline').hidden = true;
+    $('files-tab').setAttribute('aria-selected', 'true'); $('outline-tab').setAttribute('aria-selected', 'false');
+  }
   updateUI();
 }
 
@@ -641,6 +661,7 @@ function capture() {
 }
 
 function updateUI() {
+  folderFollower.follow();
   const active = focusedDoc();
   const viewMode = activePane === 'right' ? secondary?.mode : mode;
   const plainText = active?.kind === 'text';
@@ -693,7 +714,8 @@ function updateUI() {
     }));
   }
   $('file-tree').querySelectorAll('button[data-file-id]').forEach(button => {
-    button.classList.toggle('active', active?.file?.path && active.file.root === rootFolder?.path && button.dataset.fileId === active.file.id);
+    const activeId = active?.file?.directory === rootFolder?.path ? active.file.name : active?.file?.root === rootFolder?.path ? active.file.id : null;
+    button.classList.toggle('active', Boolean(activeId) && button.dataset.fileId === activeId);
   });
   const headings = plainText || !active ? [] : [...active.history.current.markdown.matchAll(/^(#{1,6})\s+(.+)$/gm)];
   $('outline').replaceChildren(...headings.map((match, headingIndex) => {
@@ -786,6 +808,7 @@ function selectDocument(index, { forceLeft = false } = {}) {
     else { mode = 'visual'; doc().mode = 'visual'; }
   }
   render();
+  folderFollower.follow(true);
 }
 
 function undo() { if (activePane === 'right') secondary?.undoRedo('undo'); else if (doc()) { capture(); doc().history.undo(); render(); } }
@@ -1032,6 +1055,8 @@ window.verifyRecoveryCheck = async () => {
 };
 
 window.runPrototypeChecks = async () => {
+  let fixtureScope;
+  const openFixtureFile = id => openWorkspaceFile(id, 'left', fixtureScope);
   const checks = [];
   const check = (name, passed) => checks.push({ name, passed: Boolean(passed) });
   check('真实可视编辑区域已载入', richRoot().isContentEditable);
@@ -1107,7 +1132,7 @@ window.runPrototypeChecks = async () => {
   await sleep(350);
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   check('验证结束已恢复干净的示例文档', doc().history.current.markdown === sample && !richRoot().textContent.includes('中文编辑验证'));
-  await chooseFolder();
+  await chooseFolder(); fixtureScope = rootFolder.path;
   const listed = [...$('file-tree').querySelectorAll('[data-file-id]')].map(button => button.dataset.fileId);
   check('真实目录列出 Markdown、TXT、代码、未知扩展名及无扩展名文本', ['README.MD', 'notes.txt', 'main.js', 'custom.xyz', 'LICENSE'].every(id => listed.includes(id)));
   check('二进制文件不会作为文本列出', !listed.includes('image.bin'));
@@ -1115,13 +1140,13 @@ window.runPrototypeChecks = async () => {
   nested.open = true;
   for (let i = 0; i < 40 && !nested.querySelector('[data-file-id]'); i++) await sleep(25);
   check('展开真实子文件夹后列出文本文件', nested.querySelector('[data-file-id="nested/说明.txt"]'));
-  await openWorkspaceFile('README.MD');
+  await openFixtureFile('README.MD');
   check('Markdown 文件首次打开默认可视编辑，大小写扩展名均识别', doc().kind === 'markdown' && mode === 'visual' && richRoot().querySelector('h1')?.textContent === '文件夹里的 Markdown');
   const markdownIndex = activeIndex;
   const count = documents.length;
-  await openWorkspaceFile('README.MD');
+  await openFixtureFile('README.MD');
   check('重复点击真实文件复用标签页', documents.length === count);
-  await openWorkspaceFile('notes.txt');
+  await openFixtureFile('notes.txt');
   const textIndex = activeIndex;
   check('TXT 使用纯文本，Markdown 标记保持字面显示', mode === 'text' && source.value === '# 纯文本标题\n**不是加粗**\n' && $('rich').hidden && $('mode-controls').hidden);
   capture();
@@ -1138,21 +1163,21 @@ window.runPrototypeChecks = async () => {
   check('两类标签页切换保留纯文本模式与修改', mode === 'text' && source.value.includes('本次窗口中的修改'));
   await refreshFolder();
   check('刷新目录保留已打开的文档和修改', mode === 'text' && doc().history.current.markdown === textEdited && $('file-tree').querySelector('[data-file-id="main.js"]'));
-  await openWorkspaceFile('main.js');
+  await openFixtureFile('main.js');
   check('代码文件按普通文本显示，不经过 Markdown 排版', mode === 'text' && source.value.includes('"**不渲染**"') && $('outline').textContent.includes('纯文本文件'));
-  await openWorkspaceFile('page.html');
+  await openFixtureFile('page.html');
   check('HTML 文件仅按文本显示，不执行其中的脚本', mode === 'text' && source.value.startsWith('<script>') && !window.__fileExecuted);
-  await openWorkspaceFile('custom.xyz');
+  await openFixtureFile('custom.xyz');
   check('未知扩展名的可解码文本可以打开', mode === 'text' && source.value.includes('不依赖文本扩展名'));
-  await openWorkspaceFile('LICENSE');
+  await openFixtureFile('LICENSE');
   check('无扩展名的文本可以打开', mode === 'text' && source.value.includes('无扩展名'));
-  await openWorkspaceFile('nested/说明.txt');
+  await openFixtureFile('nested/说明.txt');
   check('UTF-16 中文文本可正常读取且移除编码标记', source.value === '带 BOM 的中文文本\n' && doc().file.encoding === 'utf-16le');
-  await openWorkspaceFile('legacy.txt');
+  await openFixtureFile('legacy.txt');
   check('GBK 兼容文本可正常读取', source.value === '中文\n' && doc().file.encoding === 'gb18030');
   check('读取接口拒绝二进制内容', (await window.workspaceFiles.read('image.bin'))?.error);
   check('读取接口限制在所选文件夹内', (await window.workspaceFiles.read('../outside.txt'))?.error);
-  await openWorkspaceFile('README.MD');
+  await openFixtureFile('README.MD');
   await sleep(250);
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   return { versions: { vditor: engine.version, chromium: navigator.userAgent }, checks, observations };

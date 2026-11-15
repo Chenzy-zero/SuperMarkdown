@@ -7,7 +7,7 @@ export async function runStorageChecks(app) {
   const input = value => { $('source').value = value; $('source').setSelectionRange(value.length, value.length); $('source').dispatchEvent(new InputEvent('input', { bubbles: true })); };
   const sourceMode = () => { app.setLayout('single'); $('source-mode').click(); };
   const testFile = request => window.workspaceFiles.testFiles(request);
-  const read = item => window.workspaceFiles.read(item.file.id);
+  const read = item => window.workspaceFiles.read(item.file.id, item.file.root);
   app.setLayout('single'); shortcut('n'); sourceMode();
   const item = app.current();
   input('# 保存验证\n\n中文正文。\n'); shortcut('s');

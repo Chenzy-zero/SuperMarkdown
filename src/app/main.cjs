@@ -90,6 +90,7 @@ app.whenReady().then(async () => {
     return workspace.openFolder(result.filePaths[0]);
   });
   handle('application:startup', () => ({ verify: verify && !startupVerify, drafts: recovered, recoveryError }));
+  handle('workspace:active-folder', key => workspace.folderForFile(key, false));
   async function withFileFolder(file) {
     try {
       const folder = await workspace.folderForFile(file.key);

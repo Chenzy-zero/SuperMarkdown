@@ -7,6 +7,7 @@
 - `renderer.mjs`：文档、保存基线、文件操作、目录和布局协调。
 - `secondary-pane.mjs`：第二个编辑视图，复用同一文档及历史。
 - `open-files.cjs` / `file-drop.mjs`：系统文件打开请求排队，以及按编辑区域接收本地文件拖拽。
+- `active-folder.mjs`：目录跟随当前文件，并丢弃过时的异步目录结果。
 - `history.mjs` / `protected-blocks.mjs`：编辑历史与暂不支持渲染片段的原文保留。
 - `*-checks.mjs`：真实编辑器集成检查。检查样本与原生对话框替代仅在验证模式启用。
 

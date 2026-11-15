@@ -1,4 +1,5 @@
 export async function runWorkspaceChecks() {
+  const fixtureScope = document.getElementById('folder-name').title;
   const checks = [];
   const check = (name, passed) => checks.push({ name, passed: Boolean(passed) });
   const button = document.querySelector('#rich .vditor-toolbar [aria-label]');
@@ -34,13 +35,14 @@ export async function runWorkspaceChecks() {
   document.getElementById('new-file-name').value = '新建验证';
   document.getElementById('new-file-form').requestSubmit();
   check('目录右键可实际创建并打开子目录中的 md 文件', await until(() => !document.getElementById('new-file-dialog').open && [...document.querySelectorAll('#tabs .tab-select')].some(node => node.textContent.startsWith('新建验证.md'))));
-  const created = await window.workspaceFiles.read('nested/新建验证.md');
-  check('新文件已落盘且为普通空白 Markdown 文件', created.kind === 'markdown' && created.content === '' && Boolean(entry('nested/新建验证.md')));
-  const duplicate = await window.workspaceFiles.createMarkdown({ directoryId: 'nested', name: '新建验证' });
-  check('新建文件不会覆盖同名原文件', duplicate.error?.includes('同名文件已存在') && (await window.workspaceFiles.read('nested/新建验证.md')).content === '');
+  const created = await window.workspaceFiles.read('nested/新建验证.md', fixtureScope);
+  check('新文件已落盘且为普通空白 Markdown 文件', created.kind === 'markdown' && created.content === '' && await until(() => Boolean(entry('新建验证.md'))));
+  const duplicate = await window.workspaceFiles.createMarkdown({ directoryId: 'nested', name: '新建验证', root: fixtureScope });
+  check('新建文件不会覆盖同名原文件', duplicate.error?.includes('同名文件已存在') && (await window.workspaceFiles.read('nested/新建验证.md', fixtureScope)).content === '');
   const invalid = await window.workspaceFiles.createMarkdown({ directoryId: 'nested', name: '../越界' });
   check('新建文件拒绝路径穿越名称', invalid.error);
 
+  document.getElementById('choose-folder').click(); await until(() => entry('main.js'));
   await openRight('main.js');
   check('目录右键可将代码文件在右侧按纯文本打开', document.getElementById('layout-mode').value === 'files' && !document.getElementById('right-pane').hidden && !rightSource.hidden && rightSource.value.startsWith('const value'));
   const leftBefore = root.textContent;

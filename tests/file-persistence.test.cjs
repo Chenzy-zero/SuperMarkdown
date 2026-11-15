@@ -138,3 +138,15 @@ test('定位外部打开文件的父目录后，保存仍使用该目录的文�
   const saved = await workspace.save(file.key, '修改', file.revision);
   assert.equal(saved.root, root); assert.equal(saved.id, '文档.md');
 });
+
+test('焦点目录读取不改变其他进行中文件操作的默认目录', async () => {
+  const root = await fixture(), first = path.join(root, '焦点目录'), second = path.join(root, '已选目录');
+  await fs.mkdir(first); await fs.mkdir(second);
+  await fs.writeFile(path.join(first, '文件.md'), '内容');
+  const workspace = new WorkspaceFiles(); await workspace.openFolder(second);
+  const file = await workspace.readAbsolute(path.join(first, '文件.md'));
+  assert.equal(file.directory, first);
+  const folder = await workspace.folderForFile(file.key, false);
+  assert.equal(folder.path, first); assert.equal(workspace.root, second);
+  assert.equal((await workspace.read('文件.md', first)).content, '内容');
+});

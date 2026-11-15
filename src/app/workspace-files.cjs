@@ -27,13 +27,13 @@ function decodeText(bytes, partial = false) {
 
 class WorkspaceFiles {
   constructor() { this.openedFiles = new Map(); this.knownRoots = new Set(); }
-  async openFolder(folderPath) {
+  async openFolder(folderPath, activate = true) {
     const root = await fs.realpath(folderPath);
     if (!(await fs.stat(root)).isDirectory()) throw new Error('请选择一个文件夹。');
     const nextWorkspace = new WorkspaceFiles();
     nextWorkspace.root = root;
     const entries = await nextWorkspace.list('');
-    this.root = root;
+    if (activate) this.root = root;
     this.knownRoots.add(root);
     return { name: path.basename(root) || root, path: root, entries };
   }
@@ -105,9 +105,9 @@ class WorkspaceFiles {
     return file;
   }
 
-  async folderForFile(key) {
+  async folderForFile(key, activate = true) {
     const file = this.knownFile(key);
-    const folder = await this.openFolder(path.dirname(file.path));
+    const folder = await this.openFolder(path.dirname(file.path), activate);
     file.root = folder.path;
     return folder;
   }
@@ -169,7 +169,7 @@ class WorkspaceFiles {
       const decoded = decodeText(bytes);
       if (!decoded) throw new Error('此文件不是当前可读取的文本文件。');
       const result = {
-        ...decoded, revision: revisionOf(bytes), id: root ? path.relative(root, fullPath).split(path.sep).join('/') : null, path: fullPath, root,
+        ...decoded, revision: revisionOf(bytes), id: root ? path.relative(root, fullPath).split(path.sep).join('/') : null, path: fullPath, root, directory: path.dirname(fullPath),
         key: process.platform === 'win32' ? fullPath.toLowerCase() : fullPath,
         name: path.basename(fullPath),
         kind: /\.(md|markdown|mdown|mkd)$/i.test(fullPath) ? 'markdown' : 'text',

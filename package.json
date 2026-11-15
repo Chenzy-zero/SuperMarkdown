@@ -1,6 +1,6 @@
 {
   "name": "supermarkdown",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "面向 Windows 的 Markdown 可视编辑器",
   "main": "src/app/main.cjs",

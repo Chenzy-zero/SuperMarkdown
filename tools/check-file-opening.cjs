@@ -105,6 +105,24 @@ async function connect(port) {
     check('重复拖入不创建重复标签，也不覆盖该侧未保存内容', await until(() => client.evaluate(`document.querySelectorAll('#tabs .document-tab').length === ${count} && !document.getElementById('right-source').hidden && document.getElementById('right-source').value.includes('右侧未保存修改')`)));
     await drop('left', [droppedLeft, droppedExtra]);
     check('同时拖入多个文件，按同一侧打开并保留另一侧编辑', await until(() => client.evaluate(`document.querySelector('#rich:not([hidden]) h1')?.textContent === '多文件拖入正文' && document.getElementById('right-source').value.includes('右侧未保存修改')`)));
+    const clickPane = async side => {
+      const point = await client.evaluate(`(() => {const r=document.querySelector('#${side}-pane .pane-heading').getBoundingClientRect();return {x:r.left+35,y:r.top+r.height/2}})()`);
+      await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
+      await client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
+    };
+    await clickPane('right');
+    check('点击右侧编辑区后目录跟随右侧活动文件并高亮它', await until(() => client.evaluate(`document.getElementById('folder-name').title === ${JSON.stringify(rightFolder)} && document.querySelector('#file-tree button.active')?.dataset.fileId === '拖入右侧.md'`)));
+    await clickPane('left');
+    check('点击左侧编辑区后目录切回左侧活动文件的目录', await until(() => client.evaluate(`document.getElementById('folder-name').title === ${JSON.stringify(leftFolder)} && document.querySelector('#file-tree button.active')?.dataset.fileId === '第二篇拖入.md'`)));
+    const clickTab = name => client.evaluate(`[...document.querySelectorAll('#tabs .tab-select')].find(node=>node.textContent.startsWith(${JSON.stringify(name)})).click()`);
+    await clickTab('首个 文档.md');
+    check('切换文件标签后侧栏展示该文件父目录且保留编辑内容', await until(() => client.evaluate(`document.getElementById('folder-name').title === ${JSON.stringify(fixtures)} && document.getElementById('source').value.includes('未保存的正在编辑内容')`)));
+    await clickTab('拖入右侧.md');
+    check('切换到右侧文档标签时也同步目录且保留右侧未保存内容', await until(() => client.evaluate(`document.getElementById('folder-name').title === ${JSON.stringify(rightFolder)} && document.getElementById('right-source').value.includes('右侧未保存修改')`)));
+    await client.evaluate(`for(const name of ['首个 文档.md','第二篇拖入.md','拖入右侧.md','第二篇拖入.md']) [...document.querySelectorAll('#tabs .tab-select')].find(node=>node.textContent.startsWith(name)).click()`);
+    await until(() => client.evaluate(`document.getElementById('folder-name').title === ${JSON.stringify(leftFolder)}`));
+    await sleep(300);
+    check('快速交替切换后目录保持在最后激活文件，旧结果不回退', await client.evaluate(`document.getElementById('folder-name').title === ${JSON.stringify(leftFolder)} && document.querySelector('#file-tree button.active')?.dataset.fileId === '第二篇拖入.md'`));
     await client.send('Emulation.setDeviceMetricsOverride', { width: 880, height: 700, deviceScaleFactor: 1, mobile: false });
     check('最小窗口宽度下工具行不换行且操作按钮完整可见', await client.evaluate(`(() => {const bar=document.getElementById('document-toolbar');if(!bar)return false;const r=bar.getBoundingClientRect();return r.height<=52 && ['new-document','open-file','save-file','save-as','undo','redo','layout-mode'].every(id=>{const b=document.getElementById(id).getBoundingClientRect();return b.left>=r.left&&b.right<=innerWidth&&b.top>=r.top&&b.bottom<=r.bottom;})})()`));
     await client.send('Emulation.clearDeviceMetricsOverride', {});

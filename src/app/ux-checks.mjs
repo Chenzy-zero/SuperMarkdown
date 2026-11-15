@@ -45,7 +45,7 @@ export async function runUXChecks() {
   };
   const file = id => document.querySelector(`#file-tree button[data-file-id="${id}"]`);
   const tab = name => [...document.querySelectorAll('#tabs .tab-select')].find(button => button.textContent.startsWith(name));
-  const openLinks = async () => { file('links.md').click(); return until(() => root.querySelector('h1')?.textContent === '链接样本' && !document.getElementById('rich').hidden); };
+  const openLinks = async () => { (tab('links.md') || file('links.md')).click(); return until(() => root.querySelector('h1')?.textContent === '链接样本' && !document.getElementById('rich').hidden && file('README.MD')); };
   document.getElementById('files-tab').click();
   await openLinks();
   let local = root.querySelector('a[href="notes.txt"]');
