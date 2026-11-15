@@ -2,6 +2,8 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
 const iconv = require('iconv-lite');
+const formats = require('./encoding-formats.json');
+const supportedEncodings = new Set(formats.map(format => format.encoding));
 
 const revisionOf = bytes => createHash('sha256').update(bytes).digest('hex');
 const queues = new Map();
@@ -15,7 +17,7 @@ function serial(key, action) {
 
 function encodeText(content, encoding = 'utf-8', bom = false) {
   if (typeof content !== 'string') throw new Error('保存内容必须是文本。');
-  if (!['utf-8', 'utf-16le', 'utf-16be', 'gb18030'].includes(encoding)) throw new Error('不支持这个保存编码。');
+  if (!supportedEncodings.has(encoding)) throw new Error('不支持这个保存编码。');
   const bytes = iconv.encode(content, encoding);
   if (iconv.decode(bytes, encoding, { stripBOM: false }) !== content) {
     throw new Error('当前编码无法完整保存这些字符，请另存为 UTF-8 文件。');
@@ -23,6 +25,17 @@ function encodeText(content, encoding = 'utf-8', bom = false) {
   const prefix = !bom ? Buffer.alloc(0) : encoding === 'utf-8' ? Buffer.from([239,187,191]) :
     encoding === 'utf-16le' ? Buffer.from([255,254]) : encoding === 'utf-16be' ? Buffer.from([254,255]) : Buffer.alloc(0);
   return Buffer.concat([prefix, bytes]);
+}
+
+function decodeEncoding(bytes, encoding) {
+  if (!supportedEncodings.has(encoding)) throw new Error('不支持这个读取编码。');
+  const bom = encoding === 'utf-8' && bytes.subarray(0, 3).equals(Buffer.from([239,187,191])) ||
+    encoding === 'utf-16le' && bytes.subarray(0, 2).equals(Buffer.from([255,254])) ||
+    encoding === 'utf-16be' && bytes.subarray(0, 2).equals(Buffer.from([254,255]));
+  const payload = bytes.subarray(bom ? encoding === 'utf-8' ? 3 : 2 : 0);
+  const content = iconv.decode(payload, encoding, { stripBOM: false });
+  if (!iconv.encode(content, encoding).equals(payload) || content.includes('\0')) throw new Error('此编码无法完整读取该文件，请尝试其他编码。');
+  return { content, encoding, bom: Boolean(bom) };
 }
 
 async function diskRevision(target) {
@@ -81,4 +94,4 @@ class RecoveryStore {
   }
 }
 
-module.exports = { revisionOf, encodeText, writeAtomic, diskRevision, RecoveryStore };
+module.exports = { revisionOf, encodeText, decodeEncoding, writeAtomic, diskRevision, RecoveryStore };

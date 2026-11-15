@@ -48,13 +48,14 @@
       <div id="tabs" class="document-tabs" aria-label="打开的文档"></div>
       <div id="document-toolbar" class="document-toolbar" aria-label="文档操作">
         <div class="document-identity"><strong id="editor-title">开始写作</strong><span id="editor-hint">新建文档，或打开本地文件和文件夹。</span></div>
+        <button id="compare-files" title="比较左右文档（包含未保存内容）" disabled>比较左右文档</button>
       </div>
       <div class="editor-area" id="editors" data-layout="single">
         <section id="left-pane" class="editor-pane active-pane"><div class="pane-heading" hidden><span id="left-pane-name">左侧</span></div><div class="pane-content"><div id="empty-state" hidden>从左侧选择文件，或打开一个本地文件夹开始。</div><div id="rich"></div><div id="source" aria-label="Markdown 源码" hidden></div></div></section>
         <div id="pane-divider" role="separator" aria-label="调整左右正文宽度" aria-orientation="vertical" aria-controls="left-pane right-pane" tabindex="0" title="拖动调整左右宽度，双击恢复等宽"></div>
         <section id="right-pane" class="editor-pane" hidden><div class="pane-heading"><span id="right-pane-name">右侧</span><button id="close-right-pane" aria-label="关闭分屏">×</button></div><div class="pane-content"><div id="right-empty">右键选择文件，在右侧打开。</div><div id="right-rich" hidden></div><div id="right-source" aria-label="右侧文本" hidden></div></div></section>
       </div>
-      <footer><span id="status" role="status">正在载入本地编辑器…</span><span id="word-count"></span></footer>
+      <footer><span id="status" role="status">正在载入本地编辑器…</span><button id="encoding-button" title="切换保存或读取编码" disabled>UTF-8</button><span id="word-count" title="按源文统计，包含空格和换行；Windows 换行计一个字符。"></span></footer>
     </main>
   </div>
   <div id="app-menu" class="tab-menu app-menu" role="menu" hidden></div>
@@ -62,6 +63,8 @@
   <div id="toolbar-tooltip" role="tooltip" hidden></div>
   <div id="tab-menu" class="tab-menu" role="menu" aria-label="文件标签页菜单" hidden></div>
   <div id="file-menu" class="tab-menu" role="menu" aria-label="目录操作菜单" hidden></div>
+  <dialog id="encoding-dialog" aria-labelledby="encoding-title"><h3 id="encoding-title">切换文本编码</h3><p id="encoding-document"></p><label for="encoding-operation">操作</label><select id="encoding-operation"><option value="save">转换后保存</option><option value="reload">按指定编码重新读取</option></select><label for="encoding-format">编码</label><select id="encoding-format"></select><p id="encoding-note"></p><p id="encoding-error" role="alert"></p><div class="dialog-actions"><button id="encoding-cancel">取消</button><button id="encoding-apply">转换并保存</button></div></dialog>
+  <dialog id="comparison-dialog" aria-labelledby="comparison-title"><div class="comparison-toolbar"><strong id="comparison-title">左右文档对比</strong><span id="comparison-summary" role="status"></span><span id="comparison-location"></span><button id="comparison-prev" title="上一处差异 Shift+F7">↑ 上一处</button><button id="comparison-next" title="下一处差异 F7">↓ 下一处</button><button id="comparison-close">返回编辑</button></div><div class="comparison-names"><span id="comparison-left-name"></span><span id="comparison-right-name"></span></div><div id="comparison-content"></div><p class="comparison-note">只读比较当前内容，包含未保存修改 · 红色表示左侧差异，绿色表示右侧差异 · 换行风格差异不计</p></dialog>
   <dialog id="new-file-dialog" aria-labelledby="new-file-title"><form id="new-file-form"><h3 id="new-file-title">新建 Markdown 文件</h3><label for="new-file-name">文件名</label><input id="new-file-name" value="未命名.md" autocomplete="off" required><p id="new-file-error" role="alert"></p><div class="dialog-actions"><button id="new-file-cancel" type="button">取消</button><button type="submit">创建</button></div></form></dialog>
   <dialog id="close-confirm" aria-labelledby="close-title">
     <h3 id="close-title">关闭未保存的文档？</h3>

@@ -1,7 +1,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { pathToFileURL, fileURLToPath } = require('node:url');
-const { revisionOf, encodeText, writeAtomic, diskRevision } = require('./file-persistence.cjs');
+const { revisionOf, encodeText, decodeEncoding, writeAtomic, diskRevision } = require('./file-persistence.cjs');
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
@@ -11,11 +11,11 @@ function decodeText(bytes, partial = false) {
   else if (bytes[0] === 0xfe && bytes[1] === 0xff) encodings = ['utf-16be'];
   else {
     if (bytes.includes(0) || bytes.subarray(0, 5).toString('ascii') === '%PDF-') return null;
-    encodings = ['utf-8', 'gb18030'];
+    encodings = ['utf-8', 'gb18030', 'big5', 'windows-1252', 'latin1'];
   }
   for (const encoding of encodings) {
     try {
-      const text = new TextDecoder(encoding, { fatal: true }).decode(bytes, { stream: partial });
+      const text = ['big5', 'windows-1252', 'latin1'].includes(encoding) ? decodeEncoding(bytes, encoding).content : new TextDecoder(encoding, { fatal: true }).decode(bytes, { stream: partial });
       const controls = text.match(/[\u0000-\u0008\u000B\u000E-\u001F\u007F]/g)?.length ?? 0;
       if (text.includes('\0') || controls / Math.max(text.length, 1) > 0.02) return null;
       const bom = encoding === 'utf-8' ? bytes.subarray(0, 3).equals(Buffer.from([239,187,191])) : encoding.startsWith('utf-16');
@@ -117,23 +117,28 @@ class WorkspaceFiles {
     return folder;
   }
 
-  async save(key, content, revision) {
+  async save(key, content, revision, format = null) {
     const file = this.knownFile(key);
-    const written = await writeAtomic(file.path, encodeText(content, file.encoding, file.bom), revision);
-    return this.verifySaved(file.path, file.root, written);
+    const written = await writeAtomic(file.path, encodeText(content, format?.encoding || file.encoding, format ? format.bom : file.bom), revision);
+    return this.verifySaved(file.path, file.root, written, format?.encoding || file.encoding);
   }
 
-  async saveAs(filePath, content, expectedRevision) {
+  async saveAs(filePath, content, expectedRevision, format = null) {
     const parent = await fs.realpath(path.dirname(filePath));
     const target = path.join(parent, path.basename(filePath));
-    const written = await writeAtomic(target, encodeText(content), expectedRevision);
-    return this.verifySaved(target, this.root, written);
+    const written = await writeAtomic(target, encodeText(content, format?.encoding, format?.bom), expectedRevision);
+    return this.verifySaved(target, this.root, written, format?.encoding || 'utf-8');
   }
 
-  async verifySaved(target, root, writtenRevision) {
-    const file = await this.readAbsolute(target, root);
+  async verifySaved(target, root, writtenRevision, encoding) {
+    const file = await this.readAbsolute(target, root, encoding);
     if (file.revision !== writtenRevision) throw Object.assign(new Error('保存后文件又被其他程序修改，请重新载入或另存为。'), { code: 'FILE_CONFLICT' });
     return file;
+  }
+
+  async reloadEncoding(key, encoding) {
+    const file = this.knownFile(key);
+    return this.readAbsolute(file.path, file.root, encoding);
   }
 
   async inspect(key) {
@@ -163,7 +168,7 @@ class WorkspaceFiles {
     return { type: 'local', target: fullPath + (fragment ? '#' + fragment : ''), path: fullPath, fragment };
   }
 
-  async readAbsolute(filePath, root = this.root) {
+  async readAbsolute(filePath, root = this.root, requestedEncoding = null) {
     const fullPath = await fs.realpath(filePath);
     const handle = await fs.open(fullPath, 'r');
     try {
@@ -171,15 +176,17 @@ class WorkspaceFiles {
       if (!stat.isFile()) throw new Error('请选择一个文本文件。');
       if (stat.size > MAX_FILE_BYTES) throw new Error('此原型暂支持打开 20 MB 以内的文本文件。');
       const bytes = await handle.readFile();
-      const decoded = decodeText(bytes);
+      const key = process.platform === 'win32' ? fullPath.toLowerCase() : fullPath;
+      const selectedEncoding = requestedEncoding || this.openedFiles.get(key)?.selectedEncoding;
+      const decoded = selectedEncoding ? decodeEncoding(bytes, selectedEncoding) : decodeText(bytes);
       if (!decoded) throw new Error('此文件不是当前可读取的文本文件。');
       const result = {
         ...decoded, revision: revisionOf(bytes), id: root ? path.relative(root, fullPath).split(path.sep).join('/') : null, path: fullPath, root, directory: path.dirname(fullPath),
         key: process.platform === 'win32' ? fullPath.toLowerCase() : fullPath,
-        name: path.basename(fullPath),
+        name: path.basename(fullPath), selectedEncoding,
         kind: /\.(md|markdown|mdown|mkd)$/i.test(fullPath) ? 'markdown' : 'text',
       };
-      this.openedFiles.set(result.key, { path: fullPath, encoding: decoded.encoding, bom: decoded.bom, root });
+      this.openedFiles.set(result.key, { path: fullPath, encoding: decoded.encoding, bom: decoded.bom, root, selectedEncoding });
       return result;
     } finally { await handle.close(); }
   }

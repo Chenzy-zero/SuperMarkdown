@@ -1,0 +1,12 @@
+[
+  { "id": "utf8", "label": "UTF-8", "encoding": "utf-8", "bom": false },
+  { "id": "utf8bom", "label": "UTF-8 with BOM", "encoding": "utf-8", "bom": true },
+  { "id": "utf16le", "label": "UTF-16 LE", "encoding": "utf-16le", "bom": true },
+  { "id": "utf16be", "label": "UTF-16 BE", "encoding": "utf-16be", "bom": true },
+  { "id": "ascii", "label": "ASCII", "encoding": "ascii", "bom": false },
+  { "id": "gbk", "label": "GBK", "encoding": "gbk", "bom": false },
+  { "id": "gb18030", "label": "GB18030", "encoding": "gb18030", "bom": false },
+  { "id": "big5", "label": "Big5", "encoding": "big5", "bom": false },
+  { "id": "windows1252", "label": "Windows-1252", "encoding": "windows-1252", "bom": false },
+  { "id": "latin1", "label": "ISO-8859-1 (Latin-1)", "encoding": "latin1", "bom": false }
+]

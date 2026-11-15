@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('workspaceFiles', {
   openDroppedFiles: files => ipcRenderer.invoke('workspace:open-dropped', Array.from(files, file => webUtils.getPathForFile(file)).filter(Boolean)),
   save: request => ipcRenderer.invoke('workspace:save', request),
   saveAs: request => ipcRenderer.invoke('workspace:save-as', request),
+  reloadEncoding: request => ipcRenderer.invoke('workspace:reload-encoding', request),
   inspect: key => ipcRenderer.invoke('workspace:inspect', key),
   writeRecovery: documents => ipcRenderer.invoke('recovery:write', documents),
   readRecovery: () => ipcRenderer.invoke('recovery:read'),

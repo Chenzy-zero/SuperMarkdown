@@ -1,4 +1,7 @@
-import { EditorState, EditorSelection, Compartment } from '@codemirror/state';
+import { MergeView } from '@codemirror/merge';
+import formats from '../app/encoding-formats.json';
+export { formats };
+import { EditorState, EditorSelection, Compartment, StateEffect } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, drawSelection, highlightActiveLine } from '@codemirror/view';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { bracketMatching, syntaxHighlighting, HighlightStyle, LanguageDescription } from '@codemirror/language';
@@ -75,4 +78,30 @@ export function attach(host) {
     },
   };
   return host.codeEditor;
+}
+
+// 比较使用只读快照，不与文档的保存基线、撤销或编辑视图互相覆盖。
+export function compare(parent, left, right) {
+  const state = item => ({ doc: item.history.current.markdown.replace(/\r\n?/g, '\n'), extensions: [
+    EditorState.readOnly.of(true), EditorView.editable.of(false), lineNumbers(), drawSelection(),
+    EditorView.theme({}, { dark: ['dark', 'gray'].includes(document.documentElement.dataset.theme) }),
+    EditorView.contentAttributes.of({ 'aria-label': `比较文档 ${item.name}`, tabindex: '0' }),
+  ] });
+  const merge = new MergeView({ parent, a: state(left), b: state(right), highlightChanges: true, gutter: true,
+    diffConfig: { scanLimit: 2000, timeout: 1200 } });
+  const describe = (view, item) => {
+    const language = LanguageDescription.matchFilename(languages, item.name);
+    if (language) language.load().then(support => { if (merge.dom.isConnected) view.dispatch({ effects: StateEffect.appendConfig.of([support, syntaxHighlighting(colors)]) }); }).catch(() => {});
+  };
+  describe(merge.a, left); describe(merge.b, right);
+  return { get chunks() { return merge.chunks; },
+    navigate(index) {
+      const chunk = merge.chunks[index]; if (!chunk) return;
+      for (const [view, at] of [[merge.a, chunk.fromA], [merge.b, chunk.fromB]]) {
+        const position = Math.min(at, view.state.doc.length);
+        view.dispatch({ selection: { anchor: position }, effects: EditorView.scrollIntoView(position, { y: 'center' }) });
+      }
+    },
+    destroy: () => merge.destroy(),
+  };
 }

@@ -132,11 +132,12 @@ app.whenReady().then(async () => {
   let testDelay = 0, cancelNextSave = false, closeApprovals = 0;
   handle('workspace:save', async request => {
     if (verify && testDelay) await new Promise(resolve => setTimeout(resolve, testDelay));
-    return workspace.save(request.key, request.content, request.revision);
+    return workspace.save(request.key, request.content, request.revision, request.format);
   });
+  handle('workspace:reload-encoding', ({ key, encoding }) => workspace.reloadEncoding(key, encoding));
   handle('workspace:inspect', key => workspace.inspect(key));
   let saveDialogNumber = 0;
-  handle('workspace:save-as', async ({ name, content, key, openKeys = [] }) => {
+  handle('workspace:save-as', async ({ name, content, key, openKeys = [], format }) => {
     if (verify && cancelNextSave) { cancelNextSave = false; return null; }
     const current = key ? workspace.knownFile(key) : null;
     const result = verify ? { canceled: false, filePath: path.join(fixtureRoot, `另存-${++saveDialogNumber}-${path.basename(name)}`) } :
@@ -149,7 +150,7 @@ app.whenReady().then(async () => {
       throw new Error('目标文件已在其他标签页打开，请选择其他位置。');
     }
     const before = await diskRevision(target);
-    return workspace.saveAs(target, content, before.revision);
+    return workspace.saveAs(target, content, before.revision, format);
   });
   handle('recovery:write', documents => recovery.write(documents));
   handle('recovery:read', () => recovery.read());

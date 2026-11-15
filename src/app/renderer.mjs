@@ -1,3 +1,6 @@
+import { bindEncodingMenu } from './encoding-menu.mjs';
+import { bindComparison } from './comparison.mjs';
+import { documentStats } from './document-stats.mjs';
 import { icon } from './icons.mjs';
 import { bindWorkbench } from './workbench.mjs';
 import { DocumentHistory } from './history.mjs';
@@ -65,7 +68,7 @@ let newFileSide = 'left';
 const source = $('source');
 SuperMarkdownCode.attach(source);
 SuperMarkdownCode.attach($('right-source'));
-let workbench;
+let workbench, encodingMenu, comparison;
 const doc = () => documents[activeIndex];
 const focusedDoc = () => activePane === 'right' ? secondary?.document : doc();
 const richRoot = () => document.querySelector('.vditor-wysiwyg > .vditor-reset');
@@ -344,16 +347,16 @@ async function reloadDocument(item) {
   if (file.missing) { item.missing = true; throw new Error('原文件已不存在，当前内容仍保留，请另存为。'); }
   applyDisk(item, file); await flushRecovery();
 }
-async function saveDocument(item = focusedDoc(), saveAs = false) {
+async function saveDocument(item = focusedDoc(), saveAs = false, format = null) {
   if (!item) return false;
-  if (item.saving) { await item.saving; return isDirty(item) ? saveDocument(item, saveAs) : true; }
+  if (item.saving) { await item.saving; return format || isDirty(item) ? saveDocument(item, saveAs, format) : true; }
   capture(); secondary?.capture();
   const snapshot = item.history.current.markdown;
   item.saveError = '';
   const action = (async () => {
     try {
       const request = { name: item.name, content: snapshot, key: item.file?.key,
-        revision: item.file?.revision, openKeys: documents.flatMap(entry => entry.file ? [entry.file.key] : []) };
+        revision: item.file?.revision, format, openKeys: documents.flatMap(entry => entry.file ? [entry.file.key] : []) };
       const result = unwrap(await (saveAs || !item.file ? window.workspaceFiles.saveAs(request) : window.workspaceFiles.save(request)));
       if (!result) return false;
       const oldKey = item.key, oldKind = item.kind;
@@ -383,10 +386,10 @@ async function saveDocument(item = focusedDoc(), saveAs = false) {
   item.saving = action; updateUI();
   let result;
   try { result = await action; } finally { item.saving = null; updateUI(); }
-  if (result === 'missing') return saveDocument(item, true);
+  if (result === 'missing') return saveDocument(item, true, format);
   if (result === 'conflict') {
     const choice = await askConflict(item);
-    if (choice === 'save-as') return saveDocument(item, true);
+    if (choice === 'save-as') return saveDocument(item, true, format);
     if (choice === 'reload') { try { await reloadDocument(item); } catch (error) { showError(error); } }
     return false;
   }
@@ -669,7 +672,7 @@ function capture() {
 
 function updateUI() {
   folderFollower.follow();
-  workbench?.update();
+  workbench?.update(); encodingMenu?.update(); comparison?.update();
   source.codeEditor.setContext(doc()).catch(showError);
   const active = focusedDoc();
   const viewMode = activePane === 'right' ? secondary?.mode : mode;
@@ -698,7 +701,8 @@ function updateUI() {
   $('right-pane').classList.toggle('active-pane', activePane === 'right');
   $('layout-hint').textContent = layout === 'sync' ? '同一文档，左右均可编辑，内容同步' : layout === 'files' ? '点击左侧或右侧正文选择当前编辑区域' : '';
   $('layout-mode').title = $('layout-hint').textContent || '选择正文显示布局';
-  $('word-count').textContent = active ? `${active.history.current.markdown.length.toLocaleString()} 字符` : '';
+  if (active && active.statsText !== active.history.current.markdown) { active.statsText = active.history.current.markdown; active.stats = documentStats(active.statsText); }
+  $('word-count').textContent = active ? `总行数 ${active.stats.lines.toLocaleString()} · 总字符数 ${active.stats.characters.toLocaleString()}` : '';
   for (const id of ['examples', 'tabs']) {
     $(id).replaceChildren(...documents.flatMap((item, i) => {
       if (id === 'examples' && item.file) return [];
@@ -956,9 +960,15 @@ $('parent-folder').onclick = async () => {
   catch (error) { showError(error); }
   finally { $('parent-folder').disabled = !rootFolder || /^[A-Za-z]:[\\/]?$/.test(rootFolder.path) || rootFolder.path === '/'; }
 };
+const captureBoth = () => { capture(); secondary?.capture(); };
+encodingMenu = bindEncodingMenu({ current: focusedDoc, capture: captureBoth, isDirty,
+  convert: (item, format) => saveDocument(item, false, format),
+  reload: async (item, encoding) => { const file = unwrap(await window.workspaceFiles.reloadEncoding({ key: item.file.key, encoding })); applyDisk(item, file); await flushRecovery(); }, onError: showError });
+comparison = bindComparison({ pair: () => layout === 'files' ? [doc(), secondary?.document] : [], capture: captureBoth, onError: showError });
 workbench = bindWorkbench({ preferences: startup.preferences, setMode, setLayout,
   getEditor: () => (activePane === 'right' ? $('right-source') : source).codeEditor,
   getDocument: focusedDoc, getMode: () => activePane === 'right' ? secondary?.mode : mode,
+  compareFiles: () => comparison.open(), canCompare: () => !$('compare-files').disabled,
   getLayout: () => layout, closeCurrent: () => focusedDoc() && closeDocuments([focusedDoc().key]), onError: showError });
 
 const cdn = new URL('../../node_modules/vditor', location.href).href;
