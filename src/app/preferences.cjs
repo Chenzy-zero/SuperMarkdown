@@ -2,12 +2,13 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const themes = new Set(['light', 'dark', 'cream', 'gray']);
 class Preferences {
-  constructor(directory) { this.filename = path.join(directory, 'preferences.json'); this.value = { theme: 'light', sidebar: 'files' }; this.pending = Promise.resolve(); }
+  constructor(directory) { this.filename = path.join(directory, 'preferences.json'); this.value = { theme: 'light', sidebar: 'files', readingZoom: 100 }; this.pending = Promise.resolve(); }
   async read() {
     try { this.validate(JSON.parse(await fs.readFile(this.filename, 'utf8'))); } catch (error) { if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error; }
     return this.value;
   }
   validate(value) {
+    if (Number.isInteger(value?.readingZoom) && value.readingZoom >= 50 && value.readingZoom <= 300) this.value.readingZoom = value.readingZoom;
     if (themes.has(value?.theme)) this.value.theme = value.theme;
     if (['files', 'outline', 'hidden'].includes(value?.sidebar)) this.value.sidebar = value.sidebar;
   }

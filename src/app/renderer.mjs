@@ -1,3 +1,4 @@
+import { icon } from './icons.mjs';
 import { bindWorkbench } from './workbench.mjs';
 import { DocumentHistory } from './history.mjs';
 import { sample, compatibility, suggestedScale } from './samples.mjs';
@@ -507,7 +508,7 @@ function renderTree(entries, container, scope = rootFolder?.path) {
       const details = document.createElement('details');
       details.dataset.directoryId = entry.id;
       const summary = document.createElement('summary');
-      summary.textContent = entry.name;
+      summary.append(icon('folder'), document.createTextNode(entry.name));
       const children = document.createElement('div');
       children.className = 'tree-children';
       let loaded = false;
@@ -528,7 +529,7 @@ function renderTree(entries, container, scope = rootFolder?.path) {
       return details;
     }
     const button = document.createElement('button');
-    button.textContent = `▤  ${entry.name}`;
+    button.append(icon('file'), document.createTextNode(entry.name));
     button.title = entry.id;
     button.dataset.fileId = entry.id;
     button.onclick = () => openWorkspaceFile(entry.id, 'left', scope).catch(showError);

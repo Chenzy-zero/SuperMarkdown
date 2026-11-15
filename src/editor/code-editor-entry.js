@@ -47,6 +47,7 @@ export function attach(host) {
   const appearance = () => view.dispatch({ effects: theme.reconfigure(EditorView.theme({}, { dark: ['dark', 'gray'].includes(document.documentElement.dataset.theme) })) });
   new MutationObserver(appearance).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   new MutationObserver(() => { if (host.hidden && batch) cancel(); view.contentDOM.setAttribute('aria-label', host.getAttribute('aria-label') || '文本编辑器'); view.requestMeasure(); }).observe(host, { attributes: true, attributeFilter: ['hidden', 'class', 'aria-label'] });
+  document.addEventListener('reading-zoom-change', () => view.requestMeasure());
   appearance();
   host.codeEditor = {
     view, cancel, get batch() { return batch; }, get cursors() { return view.state.selection.ranges.length; },

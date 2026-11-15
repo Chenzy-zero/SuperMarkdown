@@ -1,8 +1,12 @@
+import { bindReadingZoom } from './reading-zoom.mjs';
+import { bindIcons } from './icons.mjs';
 export function bindWorkbench({ preferences, setMode, setLayout, getEditor, getDocument, getMode, getLayout, closeCurrent, onError }) {
   const $ = id => document.getElementById(id), menu = $('app-menu');
   let currentMenu = null;
-  const settings = { theme: 'light', sidebar: 'files', ...preferences };
+  const settings = { theme: 'light', sidebar: 'files', readingZoom: 100, ...preferences };
   const persist = () => window.workspaceFiles.preferences(settings).then(result => { if (result?.error) throw new Error(result.error); }).catch(onError);
+  bindIcons();
+  const zoom = bindReadingZoom({ initial: settings.readingZoom, save: value => { settings.readingZoom = value; persist(); } });
   const applyTheme = () => { document.documentElement.dataset.theme = settings.theme; };
   function sidebar(value, save = true) {
     settings.sidebar = value; document.querySelector('aside').hidden = value === 'hidden';
@@ -22,8 +26,8 @@ export function bindWorkbench({ preferences, setMode, setLayout, getEditor, getD
   function entries(key) {
     if (key === 'file') return [item('新建文档  Ctrl+N', click('new-document')), item('打开文件…  Ctrl+O', click('open-file')), item('打开文件夹…', click('choose-folder')), item('新建 Markdown…', click('new-markdown'), null, $('new-markdown').disabled), null, item('保存  Ctrl+S', click('save-file'), null, $('save-file').disabled), item('另存为…  Ctrl+Shift+S', click('save-as'), null, $('save-as').disabled), null, item('关闭当前文档  Ctrl+W', closeCurrent, null, !getDocument())];
     if (key === 'edit') return [item('撤销  Ctrl+Z', click('undo'), null, $('undo').disabled), item('重做  Ctrl+Y', click('redo'), null, $('redo').disabled), null, item('多行同时输入 / 退出', lineTyping, getEditor()?.batch || false, !getDocument() || getLayout() === 'sync' && getMode() === 'visual')];
-    if (key === 'view') return [item('文件目录', () => sidebar('files'), settings.sidebar === 'files'), item('文档大纲', () => sidebar('outline'), settings.sidebar === 'outline'), item('隐藏侧栏', () => sidebar('hidden'), settings.sidebar === 'hidden'), null, item('可视编辑', () => setMode('visual'), getMode() === 'visual', getDocument()?.kind !== 'markdown' || getLayout() === 'sync'), item('源码模式  Ctrl+Shift+M', () => setMode('source'), getMode() === 'source', getDocument()?.kind !== 'markdown' || getLayout() === 'sync'), null, ...[['single', '单文件'], ['files', '双文件并排'], ['sync', '预览 + 源码同步']].map(([value,label]) => item(label, () => setLayout(value), getLayout() === value, value === 'sync' && getDocument()?.kind !== 'markdown'))];
-    return [['light', '极简白 · 克莱因蓝'], ['dark', 'Dark 深色'], ['cream', '暖奶油'], ['gray', '科技灰']].map(([value,label]) => ({ ...item(label, () => { settings.theme = value; applyTheme(); persist(); }, settings.theme === value), theme: value }));
+    if (key === 'view') return [item('放大正文', () => zoom.increase()), item('缩小正文', () => zoom.decrease()), item('恢复 100%  Ctrl+0', () => zoom.reset()), null, item('文件目录', () => sidebar('files'), settings.sidebar === 'files'), item('文档大纲', () => sidebar('outline'), settings.sidebar === 'outline'), item('隐藏侧栏', () => sidebar('hidden'), settings.sidebar === 'hidden'), null, item('可视编辑', () => setMode('visual'), getMode() === 'visual', getDocument()?.kind !== 'markdown' || getLayout() === 'sync'), item('源码模式  Ctrl+Shift+M', () => setMode('source'), getMode() === 'source', getDocument()?.kind !== 'markdown' || getLayout() === 'sync'), null, ...[['single', '单文件'], ['files', '双文件并排'], ['sync', '预览 + 源码同步']].map(([value,label]) => item(label, () => setLayout(value), getLayout() === value, value === 'sync' && getDocument()?.kind !== 'markdown'))];
+    return [['light', 'Codex 风格'], ['dark', 'Dark 深色'], ['cream', 'Anthropic 风格'], ['gray', '科技灰']].map(([value,label]) => ({ ...item(label, () => { settings.theme = value; applyTheme(); persist(); }, settings.theme === value), theme: value }));
   }
   function close() { menu.hidden = true; currentMenu?.setAttribute('aria-expanded', 'false'); currentMenu = null; }
   for (const button of document.querySelectorAll('[data-menu]')) {
