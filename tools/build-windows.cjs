@@ -1,3 +1,4 @@
+require('./build-editor.cjs');
 const path = require('node:path');
 const { build, Platform, Arch } = require('electron-builder');
 const root = path.resolve(__dirname, '..');

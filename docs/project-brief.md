@@ -35,3 +35,5 @@ SuperMarkdown 首先服务于开发者本人，目标是在 Windows 上直接编
 选型依据、实测结果与未验证项见 [技术评估](technical-evaluation.md)；当前运行方式见 [应用说明](../src/app/README.md)。
 
 领域术语写入根目录 GLOSSARY.md，重要决策按需写入 docs/adr/。
+
+0.3.0 增加独立的靠左菜单行、目录上一级、代码语法着色与多行同时输入，并提供四套可记忆的主题。代码和源码编辑视图采用 CodeMirror，文档保存与撤销仍由应用管理。

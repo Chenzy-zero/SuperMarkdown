@@ -6,7 +6,7 @@ export async function runLayoutChecks() {
   const until = async predicate => { for (let i = 0; i < 80; i++) { if (predicate()) return true; await wait(25); } return false; };
   const layout = value => { $('layout-mode').value = value; $('layout-mode').dispatchEvent(new Event('change')); };
   const root = document.querySelector('#rich .vditor-wysiwyg > .vditor-reset');
-  const padding = element => { const css = getComputedStyle(element); return [parseFloat(css.paddingLeft), parseFloat(css.paddingRight)]; };
+  const padding = element => { const css = getComputedStyle(element.querySelector('.cm-content') || element); return [parseFloat(css.paddingLeft), parseFloat(css.paddingRight)]; };
   const sameGutters = (a, b) => padding(a).every((value, i) => Math.abs(value - padding(b)[i]) < 1);
   check('同步分屏的预览与源码使用相同的左右留白', sameGutters(root, $('right-source')));
   layout('single');

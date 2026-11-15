@@ -11,4 +11,5 @@ const result = spawnSync(process.execPath, [require.resolve('electron/install.js
   },
 });
 if (result.error) throw result.error;
+if (result.status === 0) require('./build-editor.cjs');
 process.exitCode = result.status ?? 1;

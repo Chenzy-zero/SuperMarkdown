@@ -1,6 +1,6 @@
 {
   "name": "supermarkdown",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "private": true,
   "description": "面向 Windows 的 Markdown 可视编辑器",
   "main": "src/app/main.cjs",
@@ -21,14 +21,23 @@
     "prototype": "node tools/run-prototype.cjs",
     "prototype:check": "node tools/run-prototype.cjs --verify",
     "prototype:ux-check": "node tools/run-prototype.cjs --ux-verify",
-    "dist:win": "node tools/build-windows.cjs"
+    "dist:win": "node tools/build-windows.cjs",
+    "build:editor": "node tools/build-editor.cjs",
+    "test:workbench": "node tools/check-workbench.cjs"
   },
   "dependencies": {
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/language-data": "6.5.2",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.15",
+    "@lezer/highlight": "1.2.5",
     "iconv-lite": "0.7.3",
     "vditor": "4.0.1"
   },
   "devDependencies": {
     "electron": "45.3.2",
-    "electron-builder": "26.18.0"
+    "electron-builder": "26.18.0",
+    "esbuild": "0.28.2"
   }
 }

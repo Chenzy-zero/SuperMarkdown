@@ -12,3 +12,6 @@
 - `*-checks.mjs`：真实编辑器集成检查。检查样本与原生对话框替代仅在验证模式启用。
 
 开发启动和打包命令见[根目录说明](../../README.md)，文件可靠性与边界见[保存与恢复说明](../../docs/saving-and-recovery.md)。正常用户启动为空白工作区；验证样本不会默认显示。
+
+- `workbench.mjs` / `preferences.cjs`：顶部菜单、侧栏视图、主题及用户偏好存储。
+- `../editor/code-editor-entry.js`：CodeMirror 源码/纯文本视图、语法识别和多行光标；构建生成 `vendor/code-editor.js`，不依赖网络加载。文档历史继续使用 `history.mjs`，视图不持有另一套撤销栈。

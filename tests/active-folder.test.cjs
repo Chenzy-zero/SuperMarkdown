@@ -3,6 +3,15 @@ const assert = require('node:assert/strict');
 const { ActiveFolderFollower } = require('../src/app/active-folder.mjs');
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 
+test('手动浏览上级目录后，未完成的目录跟随结果不能拉回旧位置', async () => {
+  const loading = deferred(), applied = [];
+  const target = { identity: 'left:a', key: 'a', directory: 'child' };
+  const follower = new ActiveFolderFollower({ current: () => target, root: () => 'parent', load: () => loading.promise,
+    align: () => {}, apply: folder => applied.push(folder.path), onError: assert.fail });
+  const request = follower.follow(); follower.browse(); loading.resolve({ path: 'child' }); await request;
+  assert.deepEqual(applied, []);
+});
+
 test('快速切换文件时较慢的旧目录结果不会覆盖当前目录', async () => {
   const a = deferred(), b = deferred(); let target = { identity: 'left:a', key: 'a' };
   const applied = [];

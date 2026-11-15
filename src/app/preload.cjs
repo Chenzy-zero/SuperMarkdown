@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('workspaceFiles', {
+  preferences: value => ipcRenderer.invoke('application:preferences', value),
+  parentFolder: root => ipcRenderer.invoke('workspace:parent-folder', root),
   startup: () => ipcRenderer.invoke('application:startup'),
   activeFolder: key => ipcRenderer.invoke('workspace:active-folder', key),
   takeOpenFiles: () => ipcRenderer.invoke('application:take-open-files'),

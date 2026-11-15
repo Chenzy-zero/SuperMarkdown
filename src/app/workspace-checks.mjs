@@ -68,7 +68,7 @@ export async function runWorkspaceChecks() {
   rightSource.setSelectionRange(rightSource.value.length, rightSource.value.length);
   rightSource.dispatchEvent(new InputEvent('input', { bubbles: true }));
   check('编辑右侧源码即时更新左侧排版', await until(() => [...root.querySelectorAll('h2')].some(node => node.textContent === '同步标题')));
-  check('源码同步不会抢走焦点或重置输入光标', document.activeElement === rightSource && rightSource.selectionStart === rightSource.value.length);
+  check('源码同步不会抢走焦点或重置输入光标', rightSource.contains(document.activeElement) && rightSource.selectionStart === rightSource.value.length);
   root.focus();
   const syncParagraph = [...root.querySelectorAll('p')].find(node => node.textContent === '同步正文');
   const editRange = document.createRange(); editRange.selectNodeContents(syncParagraph); editRange.collapse(false);
@@ -90,7 +90,7 @@ export async function runWorkspaceChecks() {
   check('从右侧执行撤销也同步更新左侧正文', !root.textContent.includes('左侧修改') && rightSource.value.includes('同步标题'));
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', ctrlKey: true, bubbles: true }));
   check('从右侧重做恢复两侧内容', root.textContent.includes('同步正文 · 左侧修改') && rightSource.value.includes('同步正文 · 左侧修改'));
-  check('从右侧重做保留输入焦点', document.activeElement === rightSource);
+  check('从右侧重做保留输入焦点', rightSource.contains(document.activeElement));
 
   selectLayout('single');
   check('退出同步分屏保留文档内容', document.getElementById('right-pane').hidden && root.textContent.includes('同步正文 · 左侧修改'));

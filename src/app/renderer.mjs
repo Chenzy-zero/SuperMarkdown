@@ -1,3 +1,4 @@
+import { bindWorkbench } from './workbench.mjs';
 import { DocumentHistory } from './history.mjs';
 import { sample, compatibility, suggestedScale } from './samples.mjs';
 import { preserveProtectedBlocks, protectedBlocks } from './protected-blocks.mjs';
@@ -61,6 +62,9 @@ let newFileRoot = null;
 const droppedRequests = [];
 let newFileSide = 'left';
 const source = $('source');
+SuperMarkdownCode.attach(source);
+SuperMarkdownCode.attach($('right-source'));
+let workbench;
 const doc = () => documents[activeIndex];
 const focusedDoc = () => activePane === 'right' ? secondary?.document : doc();
 const richRoot = () => document.querySelector('.vditor-wysiwyg > .vditor-reset');
@@ -264,7 +268,7 @@ function acceptFile(file, side = 'left') {
 }
 
 function acceptExternal(result, side = 'left') {
-  if (result.folder) applyFolder(result.folder);
+  if (result.folder) applyFolder(result.folder, { reveal: false });
   if (result.file) acceptFile(result.file, side);
   if (result.error || result.folderError) showError(new Error(result.error || result.folderError));
 }
@@ -551,9 +555,11 @@ function applyFolder(folder, { reveal = true } = {}) {
   rootFolder = folder;
   $('refresh-folder').disabled = false;
   $('new-markdown').disabled = false;
-  $('folder-name').textContent = folder.name; $('folder-name').title = folder.path;
+  $('parent-folder').disabled = /^[A-Za-z]:[\\/]?$/.test(folder.path) || folder.path === '/';
+  $('folder-name').textContent = folder.path; $('folder-name').title = folder.path;
   $('examples-section').open = false; renderTree(folder.entries, $('file-tree'));
   if (reveal) {
+    workbench?.sidebar('files');
     $('files').hidden = false; $('outline').hidden = true;
     $('files-tab').setAttribute('aria-selected', 'true'); $('outline-tab').setAttribute('aria-selected', 'false');
   }
@@ -662,6 +668,8 @@ function capture() {
 
 function updateUI() {
   folderFollower.follow();
+  workbench?.update();
+  source.codeEditor.setContext(doc()).catch(showError);
   const active = focusedDoc();
   const viewMode = activePane === 'right' ? secondary?.mode : mode;
   const plainText = active?.kind === 'text';
@@ -841,9 +849,10 @@ document.addEventListener('keydown', event => {
   }
 }, true);
 
+document.addEventListener('editor-batch-boundary', () => focusedDoc()?.history.closeGroup());
 document.addEventListener('compositionstart', () => { composing = true; });
 document.addEventListener('compositionend', () => { composing = false; setTimeout(() => { capture(); updateUI(); }, 0); });
-source.addEventListener('input', event => { sourceDirty = true; if (!event.isComposing) { capture(); updateUI(); } });
+source.addEventListener('input', event => { if (event.target !== source) return; sourceDirty = true; if (!event.isComposing) { capture(); updateUI(); } });
 $('rich').addEventListener('input', () => { if (!loading) richDirty = true; }, true);
 for (const id of ['visual-mode', 'source-mode', 'undo', 'redo']) {
   $(id).addEventListener('pointerdown', event => { if (activePane === 'right') secondary?.capture(); else capture(); event.preventDefault(); });
@@ -936,6 +945,20 @@ for (const [id, files] of [['files-tab', true], ['outline-tab', false]]) {
     $('outline-tab').setAttribute('aria-selected', String(!files));
   };
 }
+
+
+$('parent-folder').onclick = async () => {
+  const scope = rootFolder?.path; if (!scope) return;
+  $('parent-folder').disabled = true;
+  const navigation = folderFollower.browse();
+  try { const folder = unwrap(await window.workspaceFiles.parentFolder(scope)); if (rootFolder?.path === scope && navigation === folderFollower.sequence) applyFolder(folder); }
+  catch (error) { showError(error); }
+  finally { $('parent-folder').disabled = !rootFolder || /^[A-Za-z]:[\\/]?$/.test(rootFolder.path) || rootFolder.path === '/'; }
+};
+workbench = bindWorkbench({ preferences: startup.preferences, setMode, setLayout,
+  getEditor: () => (activePane === 'right' ? $('right-source') : source).codeEditor,
+  getDocument: focusedDoc, getMode: () => activePane === 'right' ? secondary?.mode : mode,
+  getLayout: () => layout, closeCurrent: () => focusedDoc() && closeDocuments([focusedDoc().key]), onError: showError });
 
 const cdn = new URL('../../node_modules/vditor', location.href).href;
 function bindEditorControls(root = richRoot(), viewEngine = engine, getDocument = doc, side = 'left') {

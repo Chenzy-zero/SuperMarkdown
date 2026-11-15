@@ -4,6 +4,7 @@ export class ActiveFolderFollower {
     Object.assign(this, { current, root, load, apply, align, onError });
     this.identity = null; this.sequence = 0; this.pending = null;
   }
+  browse() { this.identity = this.current().identity; this.pending = null; return ++this.sequence; }
   follow(force = false) {
     const target = this.current();
     if (!force && target.identity === this.identity) return Promise.resolve();

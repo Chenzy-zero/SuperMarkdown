@@ -1,3 +1,4 @@
+require('./build-editor.cjs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const env = { ...process.env };

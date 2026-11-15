@@ -11,6 +11,19 @@ async function fixture() {
   return fs.mkdtemp(path.join(parent, 'storage-'));
 }
 
+test('上级导航列出父目录，不改变已打开文件的保存身份，也拒绝未打开的任意路径', async () => {
+  const root = await fixture(), child = path.join(root, '子目录'); await fs.mkdir(child);
+  const filename = path.join(child, '正文.md'); await fs.writeFile(filename, '原文');
+  await fs.writeFile(path.join(root, '同级.txt'), '父目录文本');
+  const workspace = new WorkspaceFiles(); await workspace.openFolder(child);
+  const file = await workspace.read('正文.md');
+  const parent = await workspace.parentFolder(child);
+  assert.equal(parent.path, root); assert.ok(parent.entries.some(entry => entry.name === '同级.txt'));
+  await workspace.save(file.key, '继续编辑', file.revision);
+  assert.equal(await fs.readFile(filename, 'utf8'), '继续编辑');
+  await assert.rejects(workspace.parentFolder(path.dirname(root)), /请先打开/);
+});
+
 for (const [encoding, bom] of [['utf-8', false], ['utf-8', true], ['utf-16le', true], ['utf-16be', true], ['gb18030', false]]) {
   test(`保存后重新打开保留中文、编码、BOM 和 CRLF：${encoding}/${bom}`, async () => {
     const root = await fixture(), target = path.join(root, '中文.txt');

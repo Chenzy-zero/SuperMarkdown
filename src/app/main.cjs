@@ -1,7 +1,8 @@
-const { app, BrowserWindow, session, Menu, dialog, ipcMain, shell, clipboard } = require('electron');
+const { app, BrowserWindow, session, Menu, dialog, ipcMain, shell, clipboard, nativeTheme } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { WorkspaceFiles } = require('./workspace-files.cjs');
+const { Preferences } = require('./preferences.cjs');
 const { RecoveryStore, diskRevision } = require('./file-persistence.cjs');
 const { pathsFromArguments, FileOpenQueue } = require('./open-files.cjs');
 const uxVerify = process.argv.includes('--ux-verify');
@@ -41,6 +42,10 @@ app.whenReady().then(async () => {
     callback({ cancel: remote });
   });
   Menu.setApplicationMenu(null);
+  const preferences = new Preferences(app.getPath('userData'));
+  if (!verify) await preferences.read();
+  const updateAppearance = () => { nativeTheme.themeSource = ['dark', 'gray'].includes(preferences.value.theme) ? 'dark' : 'light'; };
+  updateAppearance();
   const window = new BrowserWindow({
     width: 1320, height: 940, minWidth: 880, minHeight: 620,
     show: !verify && !process.argv.includes('--file-opening-check'), backgroundColor: '#f6f7f5', title: 'SuperMarkdown',
@@ -89,7 +94,9 @@ app.whenReady().then(async () => {
     if (result.canceled || !result.filePaths.length) return null;
     return workspace.openFolder(result.filePaths[0]);
   });
-  handle('application:startup', () => ({ verify: verify && !startupVerify, drafts: recovered, recoveryError }));
+  handle('application:startup', () => ({ verify: verify && !startupVerify, drafts: recovered, recoveryError, preferences: preferences.value }));
+  handle('application:preferences', async value => { const result = await preferences.write(value); updateAppearance(); return result; });
+  handle('workspace:parent-folder', root => workspace.parentFolder(root));
   handle('workspace:active-folder', key => workspace.folderForFile(key, false));
   async function withFileFolder(file) {
     try {

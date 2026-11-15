@@ -1,40 +1,11 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const net = require('node:net');
 const { spawn } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const executable = process.argv[2] ? path.resolve(process.argv[2]) : require('electron');
 const entry = process.argv[2] ? [] : [path.join(root, 'src/app/main.cjs')];
 const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(action, limit = 5000) {
-  const end = Date.now() + limit;
-  while (Date.now() < end) { try { if (await action()) return true; } catch {} await sleep(80); }
-  return false;
-}
-async function freePort() {
-  const server = net.createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port;
-}
-async function connect(port) {
-  let page;
-  if (!await until(async () => { page = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(page => page.type === 'page'); return page?.webSocketDebuggerUrl; }, 12000)) throw new Error('无法连接隔离测试窗口。');
-  const socket = new WebSocket(page.webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
-  let sequence = 0; const pending = new Map();
-  socket.onclose = () => { for (const request of pending.values()) request.reject(new Error('测试窗口已关闭。')); pending.clear(); };
-  socket.onmessage = event => {
-    const result = JSON.parse(event.data); if (!result.id) return;
-    const request = pending.get(result.id); pending.delete(result.id);
-    if (result.error || result.result?.exceptionDetails) request?.reject(new Error(JSON.stringify(result.error || result.result.exceptionDetails)));
-    else request?.resolve(result.result);
-  };
-  const send = (method, params) => new Promise((resolve, reject) => {
-    const id = ++sequence; pending.set(id, { resolve, reject });
-    socket.send(JSON.stringify({ id, method, params }));
-  });
-  return { close: () => socket.close(), send, evaluate: expression => send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }).then(result => result.result?.value) };
-}
+const { connect, freePort, until, sleep } = require('./cdp.cjs');
 
 (async () => {
   const parent = path.join(root, '.prototype-artifacts'); await fs.mkdir(parent, { recursive: true });
@@ -67,7 +38,7 @@ async function connect(port) {
       await client.evaluate(`document.querySelector('#tabs [aria-label="关闭 同级说明.txt"]').click()`);
       await until(() => client.evaluate(`document.querySelectorAll('#tabs .document-tab').length === 1`));
     } else check('侧栏可切换同级非 Markdown 文件并以纯文本显示', false);
-    check('文件信息和新建打开保存、撤销重做、布局合并为一行', await client.evaluate(`(() => { const ids=['editor-title','save-file','undo','layout-mode']; const nodes=ids.map(id=>document.getElementById(id)); return nodes.every(node=>node.closest('#document-toolbar')) && Math.max(...nodes.map(node=>{const r=node.getBoundingClientRect();return r.top+r.height/2}))-Math.min(...nodes.map(node=>{const r=node.getBoundingClientRect();return r.top+r.height/2})) < 3; })()`));
+    check('操作移入靠左独立菜单行，文件路径单独显示', await client.evaluate(`(() => { const ids=['save-file','undo','layout-mode']; const nodes=ids.map(id=>document.getElementById(id)); return nodes.every(node=>node.closest('#app-menu-row')) && Math.max(...nodes.map(node=>{const r=node.getBoundingClientRect();return r.top+r.height/2}))-Math.min(...nodes.map(node=>{const r=node.getBoundingClientRect();return r.top+r.height/2})) < 3; })()`));
     await client.evaluate(`(() => {
       if (!document.querySelector('#tabs .tab-select')) document.getElementById('new-document').click();
       document.getElementById('source-mode').click();
@@ -124,7 +95,7 @@ async function connect(port) {
     await sleep(300);
     check('快速交替切换后目录保持在最后激活文件，旧结果不回退', await client.evaluate(`document.getElementById('folder-name').title === ${JSON.stringify(leftFolder)} && document.querySelector('#file-tree button.active')?.dataset.fileId === '第二篇拖入.md'`));
     await client.send('Emulation.setDeviceMetricsOverride', { width: 880, height: 700, deviceScaleFactor: 1, mobile: false });
-    check('最小窗口宽度下工具行不换行且操作按钮完整可见', await client.evaluate(`(() => {const bar=document.getElementById('document-toolbar');if(!bar)return false;const r=bar.getBoundingClientRect();return r.height<=52 && ['new-document','open-file','save-file','save-as','undo','redo','layout-mode'].every(id=>{const b=document.getElementById(id).getBoundingClientRect();return b.left>=r.left&&b.right<=innerWidth&&b.top>=r.top&&b.bottom<=r.bottom;})})()`));
+    check('最小窗口宽度下工具行不换行且操作按钮完整可见', await client.evaluate(`(() => {const bar=document.getElementById('app-menu-row');if(!bar)return false;const r=bar.getBoundingClientRect();return r.height<=52 && ['new-document','open-file','save-file','save-as','undo','redo','layout-mode'].every(id=>{const b=document.getElementById(id).getBoundingClientRect();return b.left>=r.left&&b.right<=innerWidth&&b.top>=r.top&&b.bottom<=r.bottom;})})()`));
     await client.send('Emulation.clearDeviceMetricsOverride', {});
     const screenshot = await client.send('Page.captureScreenshot', { format: 'png' });
     await fs.writeFile(path.join(parent, 'workspace-dragging.png'), Buffer.from(screenshot.data, 'base64'));

@@ -38,6 +38,11 @@ class WorkspaceFiles {
     return { name: path.basename(root) || root, path: root, entries };
   }
 
+  async parentFolder(root = this.root) {
+    if (!root || (root !== this.root && !this.knownRoots.has(root))) throw new Error('请先打开这个文件夹。');
+    return this.openFolder(path.dirname(root));
+  }
+
   async resolve(id, root = this.root) {
     if (!root) throw new Error('请先打开文件夹。');
     if (root !== this.root && !this.knownRoots.has(root)) throw new Error('请先打开这个文件夹。');

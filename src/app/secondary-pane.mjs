@@ -10,6 +10,7 @@ export class SecondaryPane {
     this.loading = false; this.composing = false; this.initialized = false;
     this.richDirty = false; this.sourceDirty = false;
     this.source.addEventListener('input', event => {
+      if (event.target !== this.source) return;
       this.sourceDirty = true;
       if (!event.isComposing) this.capture();
     });
@@ -83,6 +84,7 @@ export class SecondaryPane {
   refresh({ force = false, focus = false } = {}) {
     if (!this.initialized || this.composing) return;
     const item = this.document;
+    this.source.codeEditor.setContext(item).catch(this.onError);
     document.getElementById('right-empty').hidden = Boolean(item);
     document.getElementById('right-pane-name').textContent = item ? `右侧 · ${item.name}${this.mode === 'source' ? ' · 源码' : this.mode === 'text' ? ' · 纯文本' : ''}` : '右侧';
     document.getElementById('right-rich').hidden = !item || this.mode !== 'visual';
