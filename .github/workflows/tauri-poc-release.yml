@@ -1,0 +1,66 @@
+name: Publish Tauri POC pre-release
+
+on:
+  push:
+    branches:
+      - experiment/tauri-poc
+    paths:
+      - ".github/workflows/tauri-poc-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - name: Download the successful Windows NSIS build
+        uses: actions/download-artifact@v4
+        with:
+          name: SuperMarkdown-Tauri-POC-Windows
+          run-id: 44048622220
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: release-assets
+
+      - name: Validate installer and prepare checksums and release notes
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem -LiteralPath "release-assets" -Filter "*.exe" -File)
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one Tauri POC installer, found $($installers.Count)."
+          }
+          $installer = $installers[0]
+          if ($installer.Length -ne 8214050) {
+            throw "Unexpected installer size: $($installer.Length) bytes (expected 8214050)."
+          }
+          $digest = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$digest  $($installer.Name)" | Set-Content -Path "release-assets/SHA256SUMS.txt" -Encoding utf8
+          Write-Host "Verified $($installer.Name): $($installer.Length) bytes, SHA256 $digest"
+          @'
+          # SuperMarkdown Tauri 2 POC / Windows x64
+
+          此版本仅供体验和技术验证，**不是正式版**，不会取代现有 Electron v0.4.0。
+
+          - 源码分支：experiment/tauri-poc
+          - 安装包构建提交：96be27cc88b636067568d8748d78522f6000f565
+          - CI：Windows Rust 8 项单元测试、原有 Node.js 测试、cargo check、NSIS 构建通过
+          - 安装包：Windows x64 NSIS，未签名；与 Electron 使用不同应用标识及数据目录
+          - 依赖：系统需具备可用的 Microsoft Edge WebView2 Runtime
+          - 仍待人工测试：可视编辑与中文输入、系统文件关联、拖拽、文档恢复、编码往返、不同目标系统上的离线安装与内存占用
+
+          本次安装包是 GitHub Actions 成功构建产物的原样上传，并非重新打包。SHA256SUMS.txt 是对此 EXE 的校验值。
+
+          [构建记录](https://github.com/Chenzy-zero/SuperMarkdown/actions/runs/44048622220) · [POC 说明](https://github.com/Chenzy-zero/SuperMarkdown/blob/experiment/tauri-poc/docs/tauri-poc.md)
+
+          如试用发现问题，可直接删除本条预发布版本；不会影响 Electron 正式 Release。
+          '@ | Set-Content -Path "release-notes.md" -Encoding utf8
+
+      - name: Create POC pre-release and upload the verified installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $installer = Get-ChildItem -LiteralPath "release-assets" -Filter "*.exe" -File | Select-Object -First 1
+          gh release create "v0.4.0-tauri-poc.1" $installer.FullName "release-assets/SHA256SUMS.txt" --repo "Chenzy-zero/SuperMarkdown" --target "96be27cc88b636067568d8748d78522f6000f565" --title "SuperMarkdown v0.4.0 · Tauri 2 POC (Windows x64)" --notes-file "release-notes.md" --prerelease --latest=false
