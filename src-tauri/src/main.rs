@@ -645,7 +645,7 @@ fn resolve_link(state: &WorkspaceState, request: &LinkRequest) -> Result<LinkInf
 }
 
 #[tauri::command]
-fn startup(app: AppHandle) -> Result<StartupResult, String> {
+fn startup(app: AppHandle, state: State<'_, WorkspaceState>) -> Result<StartupResult, String> {
     let data_dir = app_data_dir(&app)?;
     let recovery_path = data_dir.join("drafts.json");
     let (drafts, recovery_error) = match fs::read_to_string(&recovery_path) {
@@ -658,6 +658,37 @@ fn startup(app: AppHandle) -> Result<StartupResult, String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => (Vec::new(), String::new()),
         Err(error) => (Vec::new(), error.to_string()),
     };
+    // 恢复草稿只作为文件登记线索：路径必须仍存在，且与原文件身份一致。
+    // 这样恢复后的已命名文档才能继续走原文件保存和冲突检查。
+    for draft in &drafts {
+        let Some(file) = draft.get("file") else { continue };
+        let (Some(path), Some(key), Some(encoding)) = (
+            file.get("path").and_then(Value::as_str),
+            file.get("key").and_then(Value::as_str),
+            file.get("encoding").and_then(Value::as_str),
+        ) else { continue };
+        if !["utf-8", "utf-16le", "utf-16be", "ascii", "gbk", "gb18030", "big5", "windows-1252", "latin1"].contains(&encoding) {
+            continue;
+        }
+        let Ok(canonical) = PathBuf::from(path).canonicalize() else { continue };
+        if !canonical.is_file() || path_key(&canonical) != key { continue; }
+        let parent = canonical.parent().unwrap_or(&canonical).to_path_buf();
+        let root = file.get("root").and_then(Value::as_str)
+            .and_then(|candidate| PathBuf::from(candidate).canonicalize().ok())
+            .filter(|candidate| canonical.starts_with(candidate))
+            .unwrap_or(parent);
+        let selected_encoding = file.get("selectedEncoding").and_then(Value::as_str)
+            .filter(|selected| ["utf-8", "utf-16le", "utf-16be", "ascii", "gbk", "gb18030", "big5", "windows-1252", "latin1"].contains(selected))
+            .map(str::to_string);
+        state.opened_files.lock().map_err(|_| "文件状态不可用。".to_string())?
+            .insert(key.to_string(), OpenedFile {
+                path: canonical,
+                encoding: encoding.to_string(),
+                bom: file.get("bom").and_then(Value::as_bool).unwrap_or(false),
+                root: root.clone(), selected_encoding,
+            });
+        add_known_root(&state, &root)?;
+    }
     Ok(StartupResult { verify: false, drafts, recovery_error, preferences: read_preferences(&app)? })
 }
 
@@ -1002,6 +1033,21 @@ mod tests {
     fn binary_files_are_not_detected_as_text() {
         assert!(decode_text(&[0x89, 0x50, 0x00, 0x4E, 0x47]).is_err());
         assert!(decode_text(b"%PDF-1.7").is_err());
+    }
+
+    #[test]
+    fn utf16_bom_is_detected_before_binary_filter() {
+        let bytes = encode_text("中文", "utf-16le", true).unwrap();
+        let (text, encoding, bom) = decode_text(&bytes).unwrap();
+        assert_eq!(text, "中文");
+        assert_eq!(encoding, "utf-16le");
+        assert!(bom);
+    }
+
+    #[test]
+    fn directory_entry_serializes_as_type() {
+        let entry = DirectoryEntry { id: "note.md".into(), name: "note.md".into(), kind: "file".into() };
+        assert_eq!(serde_json::to_value(entry).unwrap()["type"], "file");
     }
 
     #[test]
