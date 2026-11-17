@@ -708,9 +708,8 @@ async fn choose_folder(app: AppHandle, state: State<'_, WorkspaceState>) -> Resu
 
 #[tauri::command]
 async fn open_file(app: AppHandle, state: State<'_, WorkspaceState>) -> Result<Option<OpenFileResult>, String> {
-    let selected = app.dialog().file().set_title("打开文本文件")
-        .add_filter("文本文件", &["md", "markdown", "mdown", "mkd", "txt", "text", "js", "ts", "json", "yaml", "yml", "toml", "py", "rs", "go", "c", "cpp", "h", "css", "html"])
-        .blocking_pick_file();
+    // 不按扩展名限制选择：无扩展名、日志和配置文件仍可读取，内容由后端验证。
+    let selected = app.dialog().file().set_title("打开文本文件").blocking_pick_file();
     let Some(selected) = selected else { return Ok(None); };
     let path = selected.into_path().map_err(|error| error.to_string())?;
     with_file_folder(&state, &path).map(Some)
@@ -761,8 +760,8 @@ async fn save_as(
     state: State<'_, WorkspaceState>,
     request: SaveAsRequest,
 ) -> Result<Option<FileInfo>, String> {
-    let mut dialog = app.dialog().file().set_title("另存为").set_file_name(request.name.clone())
-        .add_filter("文本文件", &["md", "markdown", "txt", "text"]);
+    // 保留原扩展名，避免代码、日志等文件另存时被系统对话框改写为 Markdown。
+    let mut dialog = app.dialog().file().set_title("另存为").set_file_name(request.name.clone());
     if let Some(key) = request.key.as_ref() {
         if let Ok(opened) = state.opened_files.lock() {
             if let Some(file) = opened.get(key) {
