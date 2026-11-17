@@ -24,7 +24,7 @@ jobs:
         with:
           version: 11.25.0
       - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
       - uses: dtolnay/rust-toolchain@stable
       - name: Prepare Tauri frontend
         run: node tools/prepare-tauri-frontend.cjs
