@@ -6,7 +6,7 @@ module.exports = {
   asar: true,
   npmRebuild: false,
   fileAssociations: [{ ext: ['md', 'markdown', 'mdown', 'mkd'], name: 'SuperMarkdown.Markdown', description: 'Markdown 文档', role: 'Editor', icon: 'icon.ico' }],
-  files: ['src/app/**/*', 'README.md', 'docs/releases/*.md'],
+  files: ['src/app/**/*', 'README.md', 'LICENSE', 'docs/releases/*.md'],
   win: {
     target: [{ target: 'nsis', arch: ['x64'] }, { target: 'zip', arch: ['x64'] }],
     artifactName: 'SuperMarkdown-${version}-windows-${arch}.${ext}',

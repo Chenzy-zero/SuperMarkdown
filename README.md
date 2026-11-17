@@ -125,3 +125,9 @@ node tools/check-file-opening.cjs (Join-Path $PWD 'dist/win-unpacked/SuperMarkdo
 代码编辑组件的浏览器资源由 `pnpm build:editor` 在本地生成；`pnpm start`、`pnpm dist:win` 和首次 `pnpm setup:electron` 自动执行。调整 `src/editor/` 后，使用桌面启动脚本前先运行该构建命令。`pnpm test:workbench` 检查真实多光标输入、代码颜色、主题恢复及目录导航（使用隔离数据目录）。
 
 `pnpm test:documents` 使用隔离文件检查行数字符数、实际编码字节、不可编码字符保护，以及两篇未保存文档的只读比较和差异跳转。
+
+## 许可协议
+
+本项目以 [MIT 许可证](LICENSE) 发布，Copyright (c) 2026 Chenzy-zero。
+
+在保留版权声明和许可声明的前提下，可自由使用、修改、合并、发布、分发、再授权和销售本软件，包括商业用途；软件按“现状”提供，不附带任何明示或暗示的担保。完整条款见 [LICENSE](LICENSE)。
