@@ -1,0 +1,20 @@
+LICENSE
+  h_2c4a43b1cd5348 1-21
+README.md
+  h_2c4a43b1cd5348 128-133
+electron-builder.cjs
+  h_2c4a43b1cd5348 9
+package.json
+  h_2c4a43b1cd5348 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e3367a5ec33e4ede337be342a40d2e6b61272194",
+  "prompts": {},
+  "humans": {
+    "h_2c4a43b1cd5348": {
+      "author": "陈志勇1003304 <chen.zhiyong@sinovatio.com>"
+    }
+  }
+}
