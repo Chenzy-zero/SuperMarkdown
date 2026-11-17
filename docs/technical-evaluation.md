@@ -80,3 +80,18 @@
 先用原型评估中文输入、选区及表格体验；补齐位置映射和语法兼容验证，再确定正式编辑内核。应用层文档状态与编辑器视图保持边界，避免文件、恢复及历史逻辑被某个候选内核绑定。
 
 本次目录选择与跨进程调用参考 [Electron dialog](https://www.electronjs.org/docs/latest/api/dialog) 和 [Electron IPC](https://www.electronjs.org/docs/latest/tutorial/ipc)，文本解码参考 [Node.js TextDecoder](https://nodejs.org/api/util.html#class-utiltextdecoder)。
+
+
+## 2026-11-17：Tauri 2 迁移验证分支
+
+为验证桌面外壳是否可以从 Electron 迁移到更轻量的 WebView 宿主，新增独立的 Tauri 2 POC。该实验不改变正式选型，不替换 Electron 发布包。
+
+POC 复用现有 HTML、CSS、Vditor、CodeMirror 和 renderer 文档状态管理，通过兼容层保留 window.workspaceFiles 接口。Electron 仍使用 preload.cjs；Tauri 使用 tauri-bridge.mjs 将同一组前端调用映射到 Rust commands。
+
+Rust 后端承担本地文件目录浏览、文本识别、打开/保存/另存为、SHA-256 冲突检测、临时文件写入、偏好设置、恢复草稿、文件关联打开和拖放文件队列。编码实现覆盖 UTF-8、UTF-8 BOM、UTF-16 LE/BE、ASCII、GBK、GB18030、Big5、Windows-1252 和 Latin-1；必须通过无损往返校验才允许编码写入。具体行为仍需与 Electron 版本逐项回归。
+
+前端资源由 tools/prepare-tauri-frontend.cjs 从 src/app 与本地 Vditor 依赖组装到 dist-tauri/frontend，避免 Tauri 包内引用 Electron 开发目录下的 node_modules 路径。
+
+当前实验的边界：未移植 Electron 专用的测试控制接口；拖放由 Tauri 原生窗口事件接管；Tauri 版本的文件冲突、编码、草稿恢复及真实中文输入法尚未在目标 Windows 机器上完成端到端验证。项目当前没有可用于本次实验的 Cargo.lock；首次 Cargo 构建会解析并下载 Rust 依赖。安装包大小、启动时间和空闲内存没有在相同环境中实测前，不得据此宣称 Tauri 更小或更快。
+
+Windows 离线部署必须验证目标镜像的 WebView2 Runtime。若系统未预装 WebView2，安装包需要提供运行时安装或固定运行时方案；这可能抵消部分体积优势。实验分支不改变正式 Electron 发布流程。

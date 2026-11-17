@@ -1,0 +1,36 @@
+name: Tauri POC checks
+
+on:
+  push:
+    branches:
+      - experiment/tauri-poc
+    paths:
+      - "src-tauri/**"
+      - "src/app/**"
+      - "tools/prepare-tauri-frontend.cjs"
+      - "docs/tauri-poc.md"
+      - ".github/workflows/tauri-poc.yml"
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Prepare Tauri frontend
+        run: node tools/prepare-tauri-frontend.cjs
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Run existing Node.js file tests
+        run: pnpm test
+      - name: Check Tauri backend
+        run: cargo check --manifest-path src-tauri/Cargo.toml

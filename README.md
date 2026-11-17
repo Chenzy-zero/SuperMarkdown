@@ -125,3 +125,23 @@ node tools/check-file-opening.cjs (Join-Path $PWD 'dist/win-unpacked/SuperMarkdo
 代码编辑组件的浏览器资源由 `pnpm build:editor` 在本地生成；`pnpm start`、`pnpm dist:win` 和首次 `pnpm setup:electron` 自动执行。调整 `src/editor/` 后，使用桌面启动脚本前先运行该构建命令。`pnpm test:workbench` 检查真实多光标输入、代码颜色、主题恢复及目录导航（使用隔离数据目录）。
 
 `pnpm test:documents` 使用隔离文件检查行数字符数、实际编码字节、不可编码字符保护，以及两篇未保存文档的只读比较和差异跳转。
+
+
+## Tauri 2 迁移验证（独立实验分支）
+
+当前 Electron 版本仍是正式实现。Tauri 2 验证代码位于 src-tauri/，不会替换 Electron 主线。
+
+详细范围、迁移映射、构建方法和已知限制见 docs/tauri-poc.md。
+
+Windows 开发环境需要 Rust stable、Microsoft C++ Build Tools、WebView2 Runtime、Node.js 24 和 pnpm 11。先安装仓库依赖，然后运行：
+
+    pnpm install --frozen-lockfile
+    node tools/prepare-tauri-frontend.cjs
+    cargo install tauri-cli --version "^2" --locked
+    cargo tauri dev
+
+构建安装包：
+
+    cargo tauri build
+
+Tauri POC 使用独立应用标识和用户数据目录，不会覆盖 Electron 版 SuperMarkdown 的用户配置与恢复草稿。
