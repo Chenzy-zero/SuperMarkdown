@@ -135,7 +135,7 @@ node tools/check-file-opening.cjs (Join-Path $PWD 'dist/win-unpacked/SuperMarkdo
 
 Windows 开发环境需要 Rust stable、Microsoft C++ Build Tools、WebView2 Runtime、Node.js 24 和 pnpm 11。先安装仓库依赖，然后运行：
 
-    pnpm install --frozen-lockfile
+    pnpm install --frozen-lockfile --ignore-scripts
     node tools/prepare-tauri-frontend.cjs
     cargo install tauri-cli --version "^2" --locked
     cargo tauri dev
