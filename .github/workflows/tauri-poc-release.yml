@@ -35,6 +35,10 @@ jobs:
           if ($installer.Length -ne 8214050) {
             throw "Unexpected installer size: $($installer.Length) bytes (expected 8214050)."
           }
+          # GitHub release assets normalize spaces; use an explicit stable EXE name.
+          $stableName = "SuperMarkdown.Tauri.POC_0.1.0_x64-setup.exe"
+          Rename-Item -LiteralPath $installer.FullName -NewName $stableName
+          $installer = Get-Item -LiteralPath (Join-Path "release-assets" $stableName)
           $digest = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           "$digest  $($installer.Name)" | Set-Content -Path "release-assets/SHA256SUMS.txt" -Encoding utf8
           Write-Host "Verified $($installer.Name): $($installer.Length) bytes, SHA256 $digest"
@@ -63,4 +67,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $installer = Get-ChildItem -LiteralPath "release-assets" -Filter "*.exe" -File | Select-Object -First 1
+          if (gh release view "v0.4.0-tauri-poc.1" --repo "Chenzy-zero/SuperMarkdown" 2>$null) {
+            gh release upload "v0.4.0-tauri-poc.1" $installer.FullName "release-assets/SHA256SUMS.txt" --repo "Chenzy-zero/SuperMarkdown" --clobber
+          } else {
           gh release create "v0.4.0-tauri-poc.1" $installer.FullName "release-assets/SHA256SUMS.txt" --repo "Chenzy-zero/SuperMarkdown" --target "96be27cc88b636067568d8748d78522f6000f565" --title "SuperMarkdown v0.4.0 · Tauri 2 POC (Windows x64)" --notes-file "release-notes.md" --prerelease --latest=false
+          }
