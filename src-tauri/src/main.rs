@@ -1050,6 +1050,39 @@ mod tests {
     }
 
     #[test]
+    fn create_save_and_detect_conflict_without_losing_disk_data() {
+        let dir = std::env::temp_dir().join(format!("supermarkdown-tauri-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("note.md");
+        let result = (|| -> Result<(), String> {
+            let first = write_atomic(&target, b"# initial\\n", None)?;
+            assert_eq!(fs::read(&target).unwrap(), b"# initial\\n");
+            let _second = write_atomic(&target, b"# updated\\n", Some(&first))?;
+            assert!(write_atomic(&target, b"# stale\\n", Some(&first)).is_err());
+            assert_eq!(fs::read(&target).unwrap(), b"# updated\\n");
+            Ok(())
+        })();
+        let _ = fs::remove_dir_all(dir);
+        result.unwrap();
+    }
+
+    #[test]
+    fn directory_operations_reject_parent_escape() {
+        let parent = std::env::temp_dir().join(format!("supermarkdown-tauri-scope-{}", Uuid::new_v4()));
+        let root = parent.join("allowed");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(parent.join("outside.md"), b"# not authorized").unwrap();
+        let state = WorkspaceState::default();
+        let result = (|| -> Result<(), String> {
+            open_folder(&state, &root, true)?;
+            assert!(resolve_path(&state, "../outside.md", &path_string(&root)).is_err());
+            Ok(())
+        })();
+        let _ = fs::remove_dir_all(parent);
+        result.unwrap();
+    }
+
+    #[test]
     fn sha256_revision_is_stable() {
         assert_eq!(revision_of(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     }
