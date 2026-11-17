@@ -469,7 +469,7 @@ fn add_known_root(state: &WorkspaceState, root: &Path) -> Result<(), String> {
 }
 
 fn resolve_path(state: &WorkspaceState, id: &str, root: &str) -> Result<(PathBuf, PathBuf), String> {
-    let root_path = PathBuf::from(root).canonicalize().map_err(|error| error.to_string())?;
+    let root_path = dunce::canonicalize(root).map_err(|error| error.to_string())?;
     let known = state.known_roots.lock().map_err(|_| "目录状态不可用。".to_string())?;
     if !known.contains(&root_path) {
         return Err("请先打开这个文件夹。".to_string());
@@ -479,7 +479,7 @@ fn resolve_path(state: &WorkspaceState, id: &str, root: &str) -> Result<(PathBuf
     if relative.is_absolute() || relative.components().any(|component| matches!(component, std::path::Component::Prefix(_) | std::path::Component::RootDir)) {
         return Err("文件路径无效。".to_string());
     }
-    let full_path = root_path.join(relative).canonicalize().map_err(|error| error.to_string())?;
+    let full_path = dunce::canonicalize(root_path.join(relative)).map_err(|error| error.to_string())?;
     if !full_path.starts_with(&root_path) {
         return Err("只能打开当前文件夹内的文件。".to_string());
     }
@@ -518,7 +518,7 @@ fn list_directory(root: &Path, directory: &Path) -> Result<Vec<DirectoryEntry>, 
 }
 
 fn open_folder(state: &WorkspaceState, folder_path: &Path, activate: bool) -> Result<FolderInfo, String> {
-    let root = folder_path.canonicalize().map_err(|error| error.to_string())?;
+    let root = dunce::canonicalize(folder_path).map_err(|error| error.to_string())?;
     if !root.is_dir() { return Err("请选择一个文件夹。".to_string()); }
     add_known_root(state, &root)?;
     if activate {
@@ -538,7 +538,7 @@ fn read_absolute(
     root_override: Option<&Path>,
     requested_encoding: Option<&str>,
 ) -> Result<FileInfo, String> {
-    let full_path = file_path.canonicalize().map_err(|error| error.to_string())?;
+    let full_path = dunce::canonicalize(file_path).map_err(|error| error.to_string())?;
     let metadata = fs::metadata(&full_path).map_err(|error| error.to_string())?;
     if !metadata.is_file() { return Err("请选择一个文本文件。".to_string()); }
     if metadata.len() > MAX_FILE_BYTES { return Err("此原型暂支持打开 20 MB 以内的文本文件。".to_string()); }
@@ -553,7 +553,7 @@ fn read_absolute(
         decode_text(&bytes)?
     };
     let root = match root_override {
-        Some(root) => root.canonicalize().map_err(|error| error.to_string())?,
+        Some(root) => dunce::canonicalize(root).map_err(|error| error.to_string())?,
         None => full_path.parent().ok_or_else(|| "文件目录无效。".to_string())?.to_path_buf(),
     };
     let relative = full_path.strip_prefix(&root).unwrap_or(full_path.as_path());
@@ -634,7 +634,7 @@ fn resolve_link(state: &WorkspaceState, request: &LinkRequest) -> Result<LinkInf
             .ok_or_else(|| "请先打开本地文件或文件夹，以确定相对链接的位置。".to_string())?;
         base.join(without_query)
     };
-    let normalized = target_path.canonicalize().unwrap_or(target_path);
+    let normalized = dunce::canonicalize(&target_path).unwrap_or(target_path);
     let fragment = percent_encoding::percent_decode_str(fragment).decode_utf8_lossy().into_owned();
     Ok(LinkInfo {
         kind: "local".to_string(),
@@ -670,11 +670,11 @@ fn startup(app: AppHandle, state: State<'_, WorkspaceState>) -> Result<StartupRe
         if !["utf-8", "utf-16le", "utf-16be", "ascii", "gbk", "gb18030", "big5", "windows-1252", "latin1"].contains(&encoding) {
             continue;
         }
-        let Ok(canonical) = PathBuf::from(path).canonicalize() else { continue };
+        let Ok(canonical) = dunce::canonicalize(path) else { continue };
         if !canonical.is_file() || path_key(&canonical) != key { continue; }
         let parent = canonical.parent().unwrap_or(&canonical).to_path_buf();
         let root = file.get("root").and_then(Value::as_str)
-            .and_then(|candidate| PathBuf::from(candidate).canonicalize().ok())
+            .and_then(|candidate| dunce::canonicalize(candidate).ok())
             .filter(|candidate| canonical.starts_with(candidate))
             .unwrap_or(parent);
         let selected_encoding = file.get("selectedEncoding").and_then(Value::as_str)
@@ -717,7 +717,7 @@ async fn open_file(app: AppHandle, state: State<'_, WorkspaceState>) -> Result<O
 
 #[tauri::command]
 fn parent_folder(root: String, state: State<'_, WorkspaceState>) -> Result<FolderInfo, String> {
-    let root_path = PathBuf::from(&root).canonicalize().map_err(|error| error.to_string())?;
+    let root_path = dunce::canonicalize(&root).map_err(|error| error.to_string())?;
     if !state.known_roots.lock().map_err(|_| "目录状态不可用。".to_string())?.contains(&root_path) {
         return Err("请先打开这个文件夹。".to_string());
     }
@@ -771,7 +771,7 @@ async fn save_as(
     }
     let Some(selected) = dialog.blocking_save_file() else { return Ok(None); };
     let target = selected.into_path().map_err(|error| error.to_string())?;
-    let parent = target.parent().ok_or_else(|| "保存路径无效。".to_string())?.canonicalize().map_err(|error| error.to_string())?;
+    let parent = dunce::canonicalize(target.parent().ok_or_else(|| "保存路径无效。".to_string())?).map_err(|error| error.to_string())?;
     let target = parent.join(target.file_name().ok_or_else(|| "保存路径无效。".to_string())?);
     let key = path_key(&target);
     for open_key in &request.open_keys {
