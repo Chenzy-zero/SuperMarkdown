@@ -127,13 +127,11 @@ node tools/check-file-opening.cjs (Join-Path $PWD 'dist/win-unpacked/SuperMarkdo
 `pnpm test:documents` 使用隔离文件检查行数字符数、实际编码字节、不可编码字符保护，以及两篇未保存文档的只读比较和差异跳转。
 
 
-## Tauri 2 迁移验证（独立实验分支）
+## Tauri 2 后端（0.5.0 转正候选）
 
-当前 Electron 版本仍是正式实现。Tauri 2 验证代码位于 src-tauri/，不会替换 Electron 主线。
+当前 0.4.0 仍由 Electron 发布；Tauri 2 代码位于 `src-tauri/`，在 `feature/tauri-promotion` 准备 0.5.0。详细范围、迁移映射、构建和数据迁移说明见 [docs/tauri.md](docs/tauri.md)。
 
-详细范围、迁移映射、构建方法和已知限制见 docs/tauri-poc.md。
-
-Windows 开发环境需要 Rust stable、Microsoft C++ Build Tools、WebView2 Runtime、Node.js 24 和 pnpm 11。先安装仓库依赖，然后运行：
+Windows 开发环境需要 Rust stable、Microsoft C++ Build Tools、WebView2 Runtime、Node.js 24 和 pnpm 11.25.0。先安装仓库依赖，然后运行：
 
     pnpm install --frozen-lockfile --ignore-scripts
     node tools/prepare-tauri-frontend.cjs
@@ -144,7 +142,7 @@ Windows 开发环境需要 Rust stable、Microsoft C++ Build Tools、WebView2 Ru
 
     cargo tauri build
 
-Tauri POC 使用独立应用标识和用户数据目录，不会覆盖 Electron 版 SuperMarkdown 的用户配置与恢复草稿。
+Rust 依赖版本由提交的 `Cargo.lock` 固定。正式标识为 `local.supermarkdown`，草稿与偏好写入 `%APPDATA%\local.supermarkdown`；从 `v0.4.0-tauri-poc.1` 迁移数据的步骤见 [docs/tauri.md](docs/tauri.md)。
 
 ## 许可协议
 
