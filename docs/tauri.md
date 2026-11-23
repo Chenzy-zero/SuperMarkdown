@@ -64,13 +64,11 @@ WebView2 Runtime 是独立于 Tauri 应用的系统组件。公司镜像如果�
 
     pnpm install --frozen-lockfile --ignore-scripts
     node tools/prepare-tauri-frontend.cjs
-    cargo install tauri-cli --version "^2" --locked
-    cargo tauri dev
+    pnpm dev:tauri
 
 构建 Windows 安装包：
 
-    node tools/prepare-tauri-frontend.cjs
-    cargo tauri build
+    pnpm build:tauri
 
 Rust 单元测试与静态检查：
 
@@ -109,12 +107,12 @@ POC 的 identifier 是 `local.supermarkdown.tauri-poc`，正式版改为 `local.
 - 真实中文输入法、Windows 文件对话框交互、系统文件关联与覆盖安装、第二实例、OS 拖放和 WebView2 Runtime 缺失/离线安装必须人工验收。
 - 现有 Electron 测试专用 `testFiles` 接口不在 Tauri 版提供，界面回归需要单独的 WebView2 测试宿主。
 - 尚无同环境的体积、内存和启动时间对比数据；POC 安装包 8,214,050 字节仅作历史记录，不能替代 0.5.0 实测。
-- CI 中 `npx @tauri-apps/cli@2` 仍按次解析版本；Cargo.lock 已固定 Rust 依赖，但正式发布流程还需要固定 Tauri CLI 版本。
+- Tauri CLI 固定为 `@tauri-apps/cli@2.12.6`；Rust 依赖由 `Cargo.lock` 固定。
 - Windows 替换文件使用 MoveFileExW；非 Windows 使用 std::fs::rename。当前项目首要目标仍是 Windows。
 
 ## 正式版发布后的验证与完善
 
 1. 在真实 Windows 环境通过保存可靠性、十种编码、恢复、文件关联与覆盖安装、拖放和离线 WebView2 验收。
 2. 体积、冷启动、空闲内存和打开大文件耗时有可重复测量，并与 Electron 0.4.0 对照。
-3. 发布流程完成参数化（版本与 tag、SHA256SUMS、release notes），并明确代码签名和自动更新策略。
-4. 后续版本持续完善发布参数化、代码签名与自动更新策略。以上事项作为 0.5.0 正式版发布后的质量验证与持续完善任务；当前发布范围为 Windows x64。Electron v0.4.0 的历史 Release 保留，不影响 Tauri v0.5.0 成为当前最新正式发行版。
+3. 后续版本通过 `.github/workflows/tauri-release.yml` 的 `v*` Tag 触发构建、测试、SHA256 计算和 Release 上传；代码签名与自动更新仍需单独规划。
+4. 以上事项作为 0.5.0 正式版发布后的质量验证与持续完善任务；当前发布范围为 Windows x64。Electron v0.4.0 的历史 Release 保留，不再生成新的 Electron 正式发行包。
