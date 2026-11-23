@@ -1,6 +1,6 @@
 {
   "name": "supermarkdown",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "面向 Windows 的 Markdown 可视编辑器",
   "main": "src/app/main.cjs",
@@ -24,7 +24,9 @@
     "dist:win": "node tools/build-windows.cjs",
     "build:editor": "node tools/build-editor.cjs",
     "test:workbench": "node tools/check-workbench.cjs",
-    "test:documents": "node tools/check-document-tools.cjs"
+    "test:documents": "node tools/check-document-tools.cjs",
+    "dev:tauri": "node tools/prepare-tauri-frontend.cjs && npx --yes @tauri-apps/cli@2.12.6 dev",
+    "build:tauri": "node tools/prepare-tauri-frontend.cjs && npx --yes @tauri-apps/cli@2.12.6 build --bundles nsis"
   },
   "dependencies": {
     "@codemirror/commands": "6.11.1",

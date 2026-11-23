@@ -1,6 +1,6 @@
 # SuperMarkdown
 
-面向 Windows 的 Markdown 可视编辑器。应用源码位于 `src/app/`，目前版本为 **0.4.0**。
+面向 Windows 的 Markdown 可视编辑器。应用源码位于 `src/app/`，目前正式发布版本为 **0.5.0（Tauri 2）**。
 
 当前已完成新建、打开、编辑、保存、另存为、关闭保护及未保存草稿恢复的文件操作闭环。图片资源管理、查找替换和更完整的 Markdown/输入法兼容性仍在后续范围内。
 
@@ -15,6 +15,7 @@
 - [0.3.0 菜单、代码编辑与四套主题](docs/releases/0.3.0.md)
 - [0.3.1 正文缩放与主题调整](docs/releases/0.3.1.md)
 - [0.4.0 文档统计、编码与差异对比](docs/releases/0.4.0.md)
+- [0.5.0 Tauri 2 Windows x64 正式版](https://github.com/Chenzy-zero/SuperMarkdown/releases/tag/v0.5.0)
 - [文件保存与恢复说明](docs/saving-and-recovery.md)
 - 历史 `v0.1.0` 是不支持正文保存的验证版本；升级前请先复制保留旧窗口中的内容。
 
@@ -65,32 +66,47 @@ Markdown 默认可视编辑，TXT、代码和其他文本原样显示。目录�
 
 有未保存修改时，关闭文件或系统窗口都会提供“保存 / 不保存 / 取消”。取消保存位置或保存失败均不会关闭文档。恢复草稿独立保存在用户数据目录，重启后提示是否恢复；草稿不会自动覆盖源文件。
 
-## 开发
+## 开发（Tauri 2 主线）
 
-使用 Node.js 24 和 pnpm 11.25.0，在仓库根目录运行：
+SuperMarkdown 从 v0.5.0 起以 Tauri 2 作为 Windows 正式桌面端。开发环境建议使用 Windows 10 1803+ / Windows 11，并准备 Node.js 24、pnpm 11.25.0、Rust stable、Microsoft C++ Build Tools（MSVC）和 Microsoft Edge WebView2 Runtime。
 
-```powershell
-pnpm install --ignore-scripts
-pnpm setup:electron
-pnpm start
-```
-
-CMD 可先运行 `cd /d E:\codex\SuperMarkdown`；PowerShell 可先运行 `Set-Location E:\codex\SuperMarkdown`。`pnpm prototype` 保留为兼容的启动别名。
-
-若 Electron 下载无法连接，可按 [Electron 官方安装说明](https://www.electronjs.org/docs/latest/tutorial/installation) 在当前终端设置镜像：
+首次安装依赖：
 
 ```powershell
-$env:ELECTRON_MIRROR = 'https://npmmirror.com/mirrors/electron/'
-$env:ELECTRON_CUSTOM_DIR = '{{ version }}'
-pnpm setup:electron
+pnpm install --frozen-lockfile --ignore-scripts
 ```
 
-下载文件仍按软件包附带的校验值验证。
+启动 Tauri 开发版：
 
-## 验证与打包
+```powershell
+pnpm dev:tauri
+```
+
+构建 Windows x64 NSIS 安装包：
+
+```powershell
+pnpm build:tauri
+```
+
+执行自动化检查：
 
 ```powershell
 pnpm test
+cargo test --locked --manifest-path src-tauri/Cargo.toml
+cargo check --locked --manifest-path src-tauri/Cargo.toml
+```
+
+`pnpm dev:tauri` 和 `pnpm build:tauri` 使用固定版本 `@tauri-apps/cli@2.12.6`，Rust 依赖由 `src-tauri/Cargo.lock` 锁定。正式版依赖系统 WebView2 Runtime；公司内网或离线终端应提前将 Runtime 纳入系统镜像或软件分发流程。
+
+### 历史 Electron 回归工具
+
+Electron v0.4.0 的历史 Release 保留，但不再作为正式发行线。Electron 源码和依赖暂时保留，用于旧版行为对照、既有 UI 回归和兼容性排查，不代表后续正式包仍由 Electron 构建。
+
+以下命令仅用于 Electron 兼容测试，不用于生成正式发行包：
+
+```powershell
+pnpm setup:electron
+pnpm start
 pnpm test:app
 pnpm test:startup
 pnpm test:recovery
@@ -98,25 +114,9 @@ pnpm test:opening
 pnpm dist:win
 ```
 
-- `test`：真实文件保存、编码、冲突、失败保护和草稿存储检查。
-- `test:app`：真实 Electron 编辑器的完整界面回归，报告和截图写入 `.prototype-artifacts/`。
-- `test:startup`：正常空白工作区的新建与保存路径。
-- `test:recovery`：先结束一个留下未保存内容的进程，再启动第二个进程验证恢复。
-- `test:opening`：通过真实进程和 OS 文件拖拽事件验证系统打开、父目录浏览、左右分屏拖拽、多文件与重复打开保护、恢复等待，以及最小窗口下的单行工具布局。
-- `dist:win`：使用 electron-builder 26.18.0 生成 `dist/` 下的 x64 NSIS 安装包及 ZIP，首次构建需要下载 NSIS 等工具。
+其中 `test:app` 使用真实 Electron 编辑器做旧版 UI 回归；`dist:win` 生成 Electron 安装包，仅用于历史版本对照。Tauri 的正式构建请使用 `pnpm build:tauri`。
 
-以上检查使用项目内的临时样本，不操作用户文档。原生文件选择/保存对话框使用固定样本替代，仍需人工检查真实对话框体验。`启动SuperMarkdown.cmd --verify` 可通过不依赖 pnpm 的入口执行界面回归。
-
-对打包后的程序执行同样的回归：
-
-```powershell
-$env:SUPERMARKDOWN_VERIFY_OUTPUT = Join-Path $PWD '.prototype-artifacts/packaged'
-Start-Process '.\dist\win-unpacked\SuperMarkdown.exe' '--ux-verify' -Wait
-node tools/check-recovery.cjs (Join-Path $PWD 'dist/win-unpacked/SuperMarkdown.exe')
-node tools/check-file-opening.cjs (Join-Path $PWD 'dist/win-unpacked/SuperMarkdown.exe')
-```
-
-发布包自带依赖和第三方许可文件，应用设置和草稿写入用户数据目录。安装包尚未进行代码签名。
+Tauri v0.5.0 的人工验收项目见 [Tauri 0.5.0 验收清单](docs/tauri-0.5.0-acceptance.md)。正式版安装包尚未进行代码签名；安装、覆盖安装、文件关联、中文输入法、拖放和 WebView2 离线部署仍需在目标 Windows 设备验证。
 
 ## 项目资料
 
@@ -125,6 +125,24 @@ node tools/check-file-opening.cjs (Join-Path $PWD 'dist/win-unpacked/SuperMarkdo
 代码编辑组件的浏览器资源由 `pnpm build:editor` 在本地生成；`pnpm start`、`pnpm dist:win` 和首次 `pnpm setup:electron` 自动执行。调整 `src/editor/` 后，使用桌面启动脚本前先运行该构建命令。`pnpm test:workbench` 检查真实多光标输入、代码颜色、主题恢复及目录导航（使用隔离数据目录）。
 
 `pnpm test:documents` 使用隔离文件检查行数字符数、实际编码字节、不可编码字符保护，以及两篇未保存文档的只读比较和差异跳转。
+
+
+## Tauri 2 桌面主线（当前正式版 0.5.0）
+
+Tauri 2 位于 `src-tauri/`，自 v0.5.0 起是唯一正式发行线。Electron v0.4.0 历史 Release 保留，Electron 源码暂用于兼容测试，不再发布新的 Electron 正式包。详细架构、构建、用户数据迁移和发布说明见 [docs/tauri.md](docs/tauri.md)。
+
+Windows 开发环境需要 Rust stable、Microsoft C++ Build Tools、WebView2 Runtime、Node.js 24 和 pnpm 11.25.0。先安装仓库依赖，然后运行：
+
+    pnpm install --frozen-lockfile --ignore-scripts
+    node tools/prepare-tauri-frontend.cjs
+    cargo install tauri-cli --version "^2" --locked
+    cargo tauri dev
+
+构建安装包：
+
+    cargo tauri build
+
+Rust 依赖版本由提交的 `Cargo.lock` 固定。正式标识为 `local.supermarkdown`，草稿与偏好写入 `%APPDATA%\local.supermarkdown`；从 `v0.4.0-tauri-poc.1` 迁移数据的步骤见 [docs/tauri.md](docs/tauri.md)。
 
 ## 许可协议
 

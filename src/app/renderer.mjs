@@ -1,3 +1,4 @@
+import './tauri-bridge.mjs';
 import { bindEncodingMenu } from './encoding-menu.mjs';
 import { bindComparison } from './comparison.mjs';
 import { documentStats } from './document-stats.mjs';
@@ -971,7 +972,7 @@ workbench = bindWorkbench({ preferences: startup.preferences, setMode, setLayout
   compareFiles: () => comparison.open(), canCompare: () => !$('compare-files').disabled,
   getLayout: () => layout, closeCurrent: () => focusedDoc() && closeDocuments([focusedDoc().key]), onError: showError });
 
-const cdn = new URL('../../node_modules/vditor', location.href).href;
+const cdn = new URL(window.__TAURI__ ? './vendor/vditor' : '../../node_modules/vditor', location.href).href;
 function bindEditorControls(root = richRoot(), viewEngine = engine, getDocument = doc, side = 'left') {
   root.addEventListener('pointerdown', () => root.parentElement.classList.remove('outline-navigation'), true);
   root.addEventListener('keydown', () => root.parentElement.classList.remove('outline-navigation'), true);

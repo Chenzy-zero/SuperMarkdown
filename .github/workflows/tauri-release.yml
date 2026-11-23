@@ -1,0 +1,102 @@
+name: Tauri stable release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Validate release version
+        shell: pwsh
+        run: |
+          $tagVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+          $packageVersion = (Get-Content "package.json" -Raw | ConvertFrom-Json).version
+          $tauriVersion = (Get-Content "src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json).version
+          $cargoText = Get-Content "src-tauri/Cargo.toml" -Raw
+          $cargoMatch = [regex]::Match($cargoText, '(?m)^version\s*=\s*"([^"]+)"')
+          if (-not $cargoMatch.Success) { throw "Cannot read Cargo package version." }
+          $cargoVersion = $cargoMatch.Groups[1].Value
+          if (($tagVersion -ne $packageVersion) -or ($tagVersion -ne $tauriVersion) -or ($tagVersion -ne $cargoVersion)) {
+            throw "Tag version $tagVersion does not match package.json ($packageVersion), tauri.conf.json ($tauriVersion), and Cargo.toml ($cargoVersion)."
+          }
+          "Release version: $tagVersion" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+      - name: Prepare Tauri frontend
+        run: node tools/prepare-tauri-frontend.cjs
+      - name: Run Rust tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: Run Node.js file tests
+        run: pnpm test
+      - name: Check Tauri backend
+        run: cargo check --locked --manifest-path src-tauri/Cargo.toml
+      - name: Build Windows NSIS installer
+        run: npx --yes @tauri-apps/cli@2.12.6 build --bundles nsis
+      - name: Generate checksum and release notes
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $installers = @(Get-ChildItem -LiteralPath "src-tauri/target/release/bundle/nsis" -Filter "*.exe" -File)
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one Tauri NSIS installer, found $($installers.Count)."
+          }
+          $installer = $installers[0]
+          $stableName = "SuperMarkdown-$version-windows-x64-setup.exe"
+          Rename-Item -LiteralPath $installer.FullName -NewName $stableName
+          $installer = Get-Item -LiteralPath (Join-Path $installer.DirectoryName $stableName)
+          $digest = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$digest  $($installer.Name)" | Set-Content -Path "SHA256SUMS.txt" -Encoding utf8
+          @"
+          # SuperMarkdown v$version — Tauri 2 / Windows x64
+
+          SuperMarkdown v$version 是 Tauri 2 Windows x64 正式版。
+
+          ## 构建验证
+          - Windows GitHub Actions 构建成功
+          - Rust 单元测试通过
+          - Node.js 文件测试通过
+          - cargo check --locked 通过
+          - NSIS 安装包：$($installer.Length) bytes
+          - SHA256：见 SHA256SUMS.txt
+
+          ## 安装须知
+          - 当前安装包未进行代码签名，Windows SmartScreen 可能显示安全提示。
+          - 应用依赖系统 Microsoft Edge WebView2 Runtime；内网或离线终端需预先部署运行时。
+          - 正式版数据目录为 %APPDATA%\\local.supermarkdown。
+          - 从 POC 迁移草稿和偏好请先关闭两个版本，再按 docs/tauri.md 的步骤手动迁移。
+
+          ## 发布后验收
+          中文输入法、文件关联、拖放、恢复、覆盖安装、WebView2 缺失/离线安装，以及启动和内存表现仍应在目标 Windows 设备验证。
+
+          Build commit: $env:GITHUB_SHA
+          "@ | Set-Content -Path "release-notes.md" -Encoding utf8
+          "Installer: $($installer.Name) ($($installer.Length) bytes)" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "SHA256: $digest" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+      - name: Publish or update GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $installer = Get-ChildItem -LiteralPath "." -Filter "SuperMarkdown-*-windows-x64-setup.exe" -File | Select-Object -First 1
+          if (-not $installer) { throw "Installer asset not found." }
+          if (gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null) {
+            gh release upload $tag $installer.FullName "SHA256SUMS.txt" --repo $env:GITHUB_REPOSITORY --clobber
+            gh release edit $tag --repo $env:GITHUB_REPOSITORY --title "SuperMarkdown $tag · Tauri 2 (Windows x64)" --notes-file "release-notes.md" --latest
+          } else {
+            gh release create $tag $installer.FullName "SHA256SUMS.txt" --repo $env:GITHUB_REPOSITORY --verify-tag --title "SuperMarkdown $tag · Tauri 2 (Windows x64)" --notes-file "release-notes.md" --latest
+          }
