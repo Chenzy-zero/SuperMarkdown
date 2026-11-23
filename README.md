@@ -127,9 +127,9 @@ Tauri v0.5.0 的人工验收项目见 [Tauri 0.5.0 验收清单](docs/tauri-0.5.
 `pnpm test:documents` 使用隔离文件检查行数字符数、实际编码字节、不可编码字符保护，以及两篇未保存文档的只读比较和差异跳转。
 
 
-## Tauri 2 后端（0.5.0 转正候选）
+## Tauri 2 桌面主线（当前正式版 0.5.0）
 
-当前 0.4.0 仍由 Electron 发布；Tauri 2 代码位于 `src-tauri/`，在 `feature/tauri-promotion` 准备 0.5.0。详细范围、迁移映射、构建和数据迁移说明见 [docs/tauri.md](docs/tauri.md)。
+Tauri 2 位于 `src-tauri/`，自 v0.5.0 起是唯一正式发行线。Electron v0.4.0 历史 Release 保留，Electron 源码暂用于兼容测试，不再发布新的 Electron 正式包。详细架构、构建、用户数据迁移和发布说明见 [docs/tauri.md](docs/tauri.md)。
 
 Windows 开发环境需要 Rust stable、Microsoft C++ Build Tools、WebView2 Runtime、Node.js 24 和 pnpm 11.25.0。先安装仓库依赖，然后运行：
 
