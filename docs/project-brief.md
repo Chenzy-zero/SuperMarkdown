@@ -48,4 +48,4 @@ SuperMarkdown 首先服务于开发者本人，目标是在 Windows 上直接编
 
 ## 2026-11-23：Tauri 正式主线
 
-Tauri v0.5.0 已发布为 Windows x64 最新稳定版。`feature/tauri-promotion` 合并至 `main` 后，Tauri 作为唯一正式发行线；Electron v0.4.0 历史 Release 保留，Electron 宿主与回归测试暂时保留，不再发布新的 Electron 正式包。真实 Windows 中文输入法、文件关联、拖放、WebView2 离线部署和性能对照按 `docs/tauri-0.5.0-acceptance.md` 继续验收。
+Tauri v0.5.0 已发布为 Windows x64 最新稳定版，并通过 PR #1 合并至 `main`（merge commit `75b7397e9de72d648fd603b93429d579993be0ae`）。Tauri 作为唯一正式发行线；Electron v0.4.0 历史 Release 保留，Electron 宿主与回归测试暂时保留，不再发布新的 Electron 正式包。真实 Windows 中文输入法、文件关联、拖放、WebView2 离线部署和性能对照按 `docs/tauri-0.5.0-acceptance.md` 继续验收。
