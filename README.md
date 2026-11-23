@@ -76,7 +76,13 @@ SuperMarkdown 从 v0.5.0 起以 Tauri 2 作为 Windows 正式桌面端。开发�
 pnpm install --frozen-lockfile --ignore-scripts
 ```
 
-启动 Tauri 开发版：
+启动 Tauri 开发版（pnpm start 也使用此入口）：
+
+```powershell
+pnpm start
+```
+
+显式启动别名：
 
 ```powershell
 pnpm dev:tauri
@@ -106,7 +112,7 @@ Electron v0.4.0 的历史 Release 保留，但不再作为正式发行线。Elec
 
 ```powershell
 pnpm setup:electron
-pnpm start
+pnpm start:electron-legacy
 pnpm test:app
 pnpm test:startup
 pnpm test:recovery
