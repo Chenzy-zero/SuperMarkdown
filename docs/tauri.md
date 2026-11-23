@@ -63,7 +63,6 @@ WebView2 Runtime 是独立于 Tauri 应用的系统组件。公司镜像如果�
 在仓库根目录运行：
 
     pnpm install --frozen-lockfile --ignore-scripts
-    node tools/prepare-tauri-frontend.cjs
     pnpm dev:tauri
 
 构建 Windows 安装包：
