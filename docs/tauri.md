@@ -1,6 +1,6 @@
 # SuperMarkdown Tauri 2 后端
 
-状态：0.5.0 转正候选。Tauri 2 已在 `experiment/tauri-poc` 完成技术验证（预发布 tag `v0.4.0-tauri-poc.1`），当前在 `feature/tauri-promotion` 准备正式发布；验收完成前，Electron 0.4.0 仍是正式发布线。
+状态：**0.5.0 已作为 Windows x64 正式版发布**（tag `v0.5.0`，发布分支 `feature/tauri-promotion`）。Windows CI 的 Rust 测试、现有 Node.js 测试、静态检查和 NSIS 构建均通过。中文输入法、文件关联、拖放、WebView2 离线安装、性能等真实 Windows 人工验收仍需继续完成。
 
 ## 目标
 
@@ -41,6 +41,10 @@
 Tauri 使用单独的 `dist-tauri/frontend`，避免打包后的 index.html 引用 Electron 开发目录中的 node_modules。
 
 `tools/prepare-tauri-frontend.cjs` 会先构建 CodeMirror 浏览器资源，再复制 `src/app` 和本地 Vditor dist，并重写 Vditor 资源路径。此操作不会改写 `src/app/index.html` 或 Electron 构建产物。
+
+## Windows WebView2 运行环境
+
+正式版安装包使用系统 WebView2 Runtime，不包含固定运行时。目标设备必须具备可用的 WebView2 Runtime；内网或离线终端应提前纳入系统镜像或软件分发流程。
 
 ## Windows 环境
 
@@ -108,9 +112,9 @@ POC 的 identifier 是 `local.supermarkdown.tauri-poc`，正式版改为 `local.
 - CI 中 `npx @tauri-apps/cli@2` 仍按次解析版本；Cargo.lock 已固定 Rust 依赖，但正式发布流程还需要固定 Tauri CLI 版本。
 - Windows 替换文件使用 MoveFileExW；非 Windows 使用 std::fs::rename。当前项目首要目标仍是 Windows。
 
-## 转正门槛
+## 正式版发布后的验证与完善
 
 1. 在真实 Windows 环境通过保存可靠性、十种编码、恢复、文件关联与覆盖安装、拖放和离线 WebView2 验收。
 2. 体积、冷启动、空闲内存和打开大文件耗时有可重复测量，并与 Electron 0.4.0 对照。
 3. 发布流程完成参数化（版本与 tag、SHA256SUMS、release notes），并明确代码签名和自动更新策略。
-4. 满足以上条件后，才把 Tauri 设为唯一发布线并停止 Electron 发布。在此之前，`feature/tauri-promotion` 只做合并和发布准备，不改变 `main` 的发布线。
+4. 后续版本持续完善发布参数化、代码签名与自动更新策略。以上事项作为 0.5.0 正式版发布后的质量验证与持续完善任务；当前发布范围为 Windows x64。Electron v0.4.0 的历史 Release 保留，不影响 Tauri v0.5.0 成为当前最新正式发行版。
