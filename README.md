@@ -135,20 +135,11 @@ Tauri v0.5.0 的人工验收项目见 [Tauri 0.5.0 验收清单](docs/tauri-0.5.
 
 ## Tauri 2 桌面主线（当前正式版 0.5.0）
 
-Tauri 2 位于 `src-tauri/`，自 v0.5.0 起是唯一正式发行线。Electron v0.4.0 历史 Release 保留，Electron 源码暂用于兼容测试，不再发布新的 Electron 正式包。详细架构、构建、用户数据迁移和发布说明见 [docs/tauri.md](docs/tauri.md)。
+Tauri 2 位于 `src-tauri/`，自 v0.5.0 起是唯一正式发行线。Electron v0.4.0 历史 Release 保留，Electron 源码暂用于兼容测试，不再发布新的 Electron 正式包。
 
-Windows 开发环境需要 Rust stable、Microsoft C++ Build Tools、WebView2 Runtime、Node.js 24 和 pnpm 11.25.0。先安装仓库依赖，然后运行：
+开发、测试和打包命令见上方 [Tauri 2 开发说明](#开发tauri-2-主线)。正式应用标识为 `local.supermarkdown`，草稿与偏好写入 `%APPDATA%\local.supermarkdown`；从 `v0.4.0-tauri-poc.1` 迁移用户数据的步骤见 [docs/tauri.md](docs/tauri.md)。
 
-    pnpm install --frozen-lockfile --ignore-scripts
-    node tools/prepare-tauri-frontend.cjs
-    cargo install tauri-cli --version "^2" --locked
-    cargo tauri dev
-
-构建安装包：
-
-    cargo tauri build
-
-Rust 依赖版本由提交的 `Cargo.lock` 固定。正式标识为 `local.supermarkdown`，草稿与偏好写入 `%APPDATA%\local.supermarkdown`；从 `v0.4.0-tauri-poc.1` 迁移数据的步骤见 [docs/tauri.md](docs/tauri.md)。
+正式发布由 `.github/workflows/tauri-release.yml` 管理：推送与应用版本一致的 `vX.Y.Z` Tag 后，自动执行版本校验、Rust/Node 测试、Windows NSIS 构建、SHA256 计算和 GitHub Release 上传。Tauri CLI 固定为 `@tauri-apps/cli@2.12.6`。
 
 ## 许可协议
 
