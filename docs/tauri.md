@@ -1,6 +1,6 @@
 # SuperMarkdown Tauri 2 后端
 
-状态：**0.5.0 已作为 Windows x64 正式版发布**（tag `v0.5.0`，发布分支 `feature/tauri-promotion`）。Windows CI 的 Rust 测试、现有 Node.js 测试、静态检查和 NSIS 构建均通过。中文输入法、文件关联、拖放、WebView2 离线安装、性能等真实 Windows 人工验收仍需继续完成。
+状态：**0.5.0 已作为 Windows x64 正式版发布并合并到 main**（tag `v0.5.0`，合并 PR #1，merge commit `75b7397e9de72d648fd603b93429d579993be0ae`）。Windows CI 的 Rust 测试、现有 Node.js 测试、静态检查和 NSIS 构建均通过。中文输入法、文件关联、拖放、WebView2 离线安装、性能等真实 Windows 人工验收仍需继续完成。
 
 ## 目标
 
@@ -101,7 +101,7 @@ POC 的 identifier 是 `local.supermarkdown.tauri-poc`，正式版改为 `local.
 
 ## 尚待实测与已知限制
 
-- 本分支的 `cargo test`、`cargo check` 与 NSIS 构建由 GitHub Actions 的 Windows runner 执行；本机未安装 MSVC Build Tools，未在本机重复编译。
+- `main` 上的 `cargo test`、`cargo check` 与 NSIS 构建由 GitHub Actions 的 Windows runner 执行；目标 Windows 设备仍需人工完成交互验收。
 - Rust 文件层尚未覆盖 Electron 现有全部 138 项编辑器 UI 回归及 14 项文件层故障注入场景。
 - 真实中文输入法、Windows 文件对话框交互、系统文件关联与覆盖安装、第二实例、OS 拖放和 WebView2 Runtime 缺失/离线安装必须人工验收。
 - 现有 Electron 测试专用 `testFiles` 接口不在 Tauri 版提供，界面回归需要单独的 WebView2 测试宿主。
