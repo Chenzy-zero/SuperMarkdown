@@ -11,7 +11,7 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "start": "node tools/run-prototype.cjs",
+    "start": "node tools/prepare-tauri-frontend.cjs && npx --yes @tauri-apps/cli@2.12.6 dev",
     "test": "node --test tests/*.test.cjs",
     "test:app": "node tools/run-prototype.cjs --ux-verify",
     "test:recovery": "node tools/check-recovery.cjs",
@@ -26,7 +26,8 @@
     "test:workbench": "node tools/check-workbench.cjs",
     "test:documents": "node tools/check-document-tools.cjs",
     "dev:tauri": "node tools/prepare-tauri-frontend.cjs && npx --yes @tauri-apps/cli@2.12.6 dev",
-    "build:tauri": "node tools/prepare-tauri-frontend.cjs && npx --yes @tauri-apps/cli@2.12.6 build --bundles nsis"
+    "build:tauri": "node tools/prepare-tauri-frontend.cjs && npx --yes @tauri-apps/cli@2.12.6 build --bundles nsis",
+    "start:electron-legacy": "node tools/run-prototype.cjs"
   },
   "dependencies": {
     "@codemirror/commands": "6.11.1",
