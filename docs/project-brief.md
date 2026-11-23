@@ -45,3 +45,7 @@ SuperMarkdown 首先服务于开发者本人，目标是在 Windows 上直接编
 2026-11-19，0.5.0 转正准备：Tauri 2 后端从 experiment/tauri-poc 重放到 main，保留 MIT 许可证；正式标识改为 `local.supermarkdown`，应用与 Cargo 包版本统一为 0.5.0，并提交 Cargo.lock 固定 Rust 依赖。Electron 0.4.0 仍是正式发布线；Tauri 通过 docs/tauri.md 中的转正门槛前，不改变发布流程。
 
 2026-11-23，Tauri 0.5.0 Windows x64 正式版发布：基于 `feature/tauri-promotion` 的成功 Windows CI 构建产物，Rust 8 项测试、Node.js 测试、cargo check 与 NSIS 打包通过。人工验收项仍需后续完成；安装包未签名并依赖 WebView2 Runtime。源码分支暂未合并至 main。
+
+## 2026-11-23：Tauri 正式主线
+
+Tauri v0.5.0 已发布为 Windows x64 最新稳定版。`feature/tauri-promotion` 合并至 `main` 后，Tauri 作为唯一正式发行线；Electron v0.4.0 历史 Release 保留，Electron 宿主与回归测试暂时保留，不再发布新的 Electron 正式包。真实 Windows 中文输入法、文件关联、拖放、WebView2 离线部署和性能对照按 `docs/tauri-0.5.0-acceptance.md` 继续验收。
