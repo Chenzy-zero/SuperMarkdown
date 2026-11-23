@@ -4,21 +4,33 @@ on:
   push:
     branches:
       - main
-      - feature/tauri-promotion
     paths:
       - "src-tauri/**"
       - "src/app/**"
+      - "src/editor/**"
       - "tools/prepare-tauri-frontend.cjs"
-      - "docs/tauri.md"
+      - "tools/build-editor.cjs"
+      - "package.json"
+      - "pnpm-lock.yaml"
       - ".github/workflows/tauri.yml"
+      - ".github/workflows/tauri-release.yml"
   pull_request:
+    branches:
+      - main
     paths:
       - "src-tauri/**"
       - "src/app/**"
+      - "src/editor/**"
       - "tools/prepare-tauri-frontend.cjs"
-      - "docs/tauri.md"
+      - "tools/build-editor.cjs"
+      - "package.json"
+      - "pnpm-lock.yaml"
       - ".github/workflows/tauri.yml"
+      - ".github/workflows/tauri-release.yml"
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   windows:
@@ -43,7 +55,7 @@ jobs:
       - name: Check Tauri backend
         run: cargo check --locked --manifest-path src-tauri/Cargo.toml
       - name: Build unsigned Tauri NSIS installer
-        run: npx --yes @tauri-apps/cli@2 build --bundles nsis
+        run: npx --yes @tauri-apps/cli@2.12.6 build --bundles nsis
       - name: Record Windows installer size
         shell: pwsh
         run: |
