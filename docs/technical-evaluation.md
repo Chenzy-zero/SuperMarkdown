@@ -108,4 +108,4 @@ Tauri 2 后端从 experiment/tauri-poc 重放到 main（含 MIT 许可证提交�
 
 ## 2026-11-23：Tauri 0.5.0 正式发布
 
-按发布决策，将 `feature/tauri-promotion` 的 Tauri 2 Windows x64 构建发布为稳定版 `v0.5.0`。发布包来自成功的 Windows CI（构建提交 `842438c1225b10fe80395de42f4003fb6f4d6a20`）：Rust 单元测试 8 项通过、现有 Node.js 测试通过、`cargo check --locked` 通过，NSIS 安装包生成成功（8,210,389 bytes）。本次正式发布不代表所有人工验收已完成；中文输入法、系统文件关联、拖放、恢复、WebView2 离线安装及性能对比仍列为发布后验证项。安装包未签名，依赖系统 WebView2 Runtime。源码发布分支暂未合并到 `main`。
+按发布决策，将 `feature/tauri-promotion` 的 Tauri 2 Windows x64 构建发布为稳定版 `v0.5.0`。发布包来自成功的 Windows CI（构建提交 `842438c1225b10fe80395de42f4003fb6f4d6a20`）：Rust 单元测试 8 项通过、现有 Node.js 测试通过、`cargo check --locked` 通过，NSIS 安装包生成成功（8,210,389 bytes）。本次正式发布不代表所有人工验收已完成；中文输入法、系统文件关联、拖放、恢复、WebView2 离线安装及性能对比仍列为发布后验证项。安装包未签名，依赖系统 WebView2 Runtime。该发布分支已通过 PR #1 于 2026-11-23 合并到 `main`，merge commit 为 `75b7397e9de72d648fd603b93429d579993be0ae`。
