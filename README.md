@@ -1,6 +1,6 @@
 # SuperMarkdown
 
-面向 Windows 的 Markdown 可视编辑器。应用源码位于 `src/app/`，目前版本为 **0.4.0**。
+面向 Windows 的 Markdown 可视编辑器。应用源码位于 `src/app/`，目前正式发布版本为 **0.5.0（Tauri 2）**。
 
 当前已完成新建、打开、编辑、保存、另存为、关闭保护及未保存草稿恢复的文件操作闭环。图片资源管理、查找替换和更完整的 Markdown/输入法兼容性仍在后续范围内。
 
@@ -15,6 +15,7 @@
 - [0.3.0 菜单、代码编辑与四套主题](docs/releases/0.3.0.md)
 - [0.3.1 正文缩放与主题调整](docs/releases/0.3.1.md)
 - [0.4.0 文档统计、编码与差异对比](docs/releases/0.4.0.md)
+- [0.5.0 Tauri 2 Windows x64 正式版](https://github.com/Chenzy-zero/SuperMarkdown/releases/tag/v0.5.0)
 - [文件保存与恢复说明](docs/saving-and-recovery.md)
 - 历史 `v0.1.0` 是不支持正文保存的验证版本；升级前请先复制保留旧窗口中的内容。
 
