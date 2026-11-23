@@ -105,3 +105,7 @@ Tauri 2 后端从 experiment/tauri-poc 重放到 main（含 MIT 许可证提交�
 尚未解决：本机没有 MSVC Build Tools，`cargo check`/`build` 与真实 Windows 端到端验收由 CI 和人工验收覆盖；Rust 测试覆盖仍明显少于 Electron 的 UI 回归与文件层故障注入；发布流程需要参数化版本、校验和与 release notes；WebView2 离线部署方案未确定。安装包体积、冷启动与内存仍未在相同环境对比，不能据此宣称 Tauri 更小更快。
 
 转正门槛：真实 Windows 环境完成保存可靠性、编码、恢复、文件关联、拖放与离线 WebView2 验收；体积、冷启动、内存和大文件打开耗时有可重复测量；发布流程参数化并明确签名与更新策略。满足后才把 Tauri 设为唯一发布线，在此之前 Electron 0.4.0 继续发布。
+
+## 2026-11-23：Tauri 0.5.0 正式发布
+
+按发布决策，将 `feature/tauri-promotion` 的 Tauri 2 Windows x64 构建发布为稳定版 `v0.5.0`。发布包来自成功的 Windows CI（构建提交 `842438c1225b10fe80395de42f4003fb6f4d6a20`）：Rust 单元测试 8 项通过、现有 Node.js 测试通过、`cargo check --locked` 通过，NSIS 安装包生成成功（8,210,389 bytes）。本次正式发布不代表所有人工验收已完成；中文输入法、系统文件关联、拖放、恢复、WebView2 离线安装及性能对比仍列为发布后验证项。安装包未签名，依赖系统 WebView2 Runtime。源码发布分支暂未合并到 `main`。
