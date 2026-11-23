@@ -72,31 +72,31 @@ SuperMarkdown 从 v0.5.0 起以 Tauri 2 作为 Windows 正式桌面端。开发�
 
 首次安装依赖：
 
-\`\`\`powershell
+```powershell
 pnpm install --frozen-lockfile --ignore-scripts
-\`\`\`
+```
 
 启动 Tauri 开发版：
 
-\`\`\`powershell
+```powershell
 pnpm dev:tauri
-\`\`\`
+```
 
 构建 Windows x64 NSIS 安装包：
 
-\`\`\`powershell
+```powershell
 pnpm build:tauri
-\`\`\`
+```
 
 执行自动化检查：
 
-\`\`\`powershell
+```powershell
 pnpm test
 cargo test --locked --manifest-path src-tauri/Cargo.toml
 cargo check --locked --manifest-path src-tauri/Cargo.toml
-\`\`\`
+```
 
-\`pnpm dev:tauri\` 和 \`pnpm build:tauri\` 使用固定版本 \`@tauri-apps/cli@2.12.6\`，Rust 依赖由 \`src-tauri/Cargo.lock\` 锁定。正式版依赖系统 WebView2 Runtime；公司内网或离线终端应提前将 Runtime 纳入系统镜像或软件分发流程。
+`pnpm dev:tauri` 和 `pnpm build:tauri` 使用固定版本 `@tauri-apps/cli@2.12.6`，Rust 依赖由 `src-tauri/Cargo.lock` 锁定。正式版依赖系统 WebView2 Runtime；公司内网或离线终端应提前将 Runtime 纳入系统镜像或软件分发流程。
 
 ### 历史 Electron 回归工具
 
@@ -104,7 +104,7 @@ Electron v0.4.0 的历史 Release 保留，但不再作为正式发行线。Elec
 
 以下命令仅用于 Electron 兼容测试，不用于生成正式发行包：
 
-\`\`\`powershell
+```powershell
 pnpm setup:electron
 pnpm start
 pnpm test:app
@@ -112,9 +112,9 @@ pnpm test:startup
 pnpm test:recovery
 pnpm test:opening
 pnpm dist:win
-\`\`\`
+```
 
-其中 \`test:app\` 使用真实 Electron 编辑器做旧版 UI 回归；\`dist:win\` 生成 Electron 安装包，仅用于历史版本对照。Tauri 的正式构建请使用 \`pnpm build:tauri\`。
+其中 `test:app` 使用真实 Electron 编辑器做旧版 UI 回归；`dist:win` 生成 Electron 安装包，仅用于历史版本对照。Tauri 的正式构建请使用 `pnpm build:tauri`。
 
 Tauri v0.5.0 的人工验收项目见 [Tauri 0.5.0 验收清单](docs/tauri-0.5.0-acceptance.md)。正式版安装包尚未进行代码签名；安装、覆盖安装、文件关联、中文输入法、拖放和 WebView2 离线部署仍需在目标 Windows 设备验证。
 
