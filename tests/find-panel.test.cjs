@@ -64,6 +64,8 @@ test('Ctrl+F 的本地查找、前后导航、大小写、关闭及文件切换�
 
     nodes['find-input'].value = 'abc';
     nodes['find-input'].emit('input');
+    nodes['find-input'].emit('keydown', { key: 'Enter', isComposing: true });
+    assert.equal(jumps.length, 0);
     nodes['find-input'].emit('keydown', { key: 'Enter' });
     assert.equal(nodes['find-summary'].textContent, '2 / 2');
     assert.deepEqual(jumps.at(-1), [7, 10]);
@@ -155,7 +157,12 @@ test('Ctrl+H 在源码模式替换一次或全部，保留 Ctrl+F 查找且不�
     assert.equal(prepared, 1);
 
     nodes['find-input'].value = 'abc';
-    nodes['replace-input'].value = '$&';
+    nodes['replace-input'].value = '    nodes['replace-input'].value = '$&';
+    nodes['replace-all'].onclick();';
+    // 中文拼音候选上屏时 Enter 不能误触发替换。
+    nodes['replace-input'].emit('keydown', { key: 'Enter', isComposing: true });
+    nodes['replace-input'].emit('keydown', { key: 'Enter', keyCode: 229 });
+    assert.equal(results.length, 0);
     nodes['replace-all'].onclick();
     assert.equal(source.value, '$& $& $&');
     assert.equal(results[0].expected, 'abc ABC abc');
