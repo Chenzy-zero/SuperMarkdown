@@ -372,3 +372,11 @@ main { border-radius:12px 12px 0 0; }
 ::highlight(supermarkdown-find-all) { background-color:rgba(244,189,69,.32); }
 ::highlight(supermarkdown-find-current) { background-color:rgba(244,171,54,.63); color:inherit; }
 @media(max-width:900px) { .find-panel { gap:6px; } .find-panel input[type=search] { flex-basis:150px; } .find-panel #find-close { margin-left:0; } }
+
+/* Issue #9：与查找复用同一栏；替换仅在源码/纯文本中执行。 */
+.replace-row[hidden] { display: none; }
+.replace-row { display:flex; flex:1 1 100%; align-items:center; flex-wrap:wrap; gap:8px; padding-top:4px; border-top:1px solid var(--border,#dce4d8); }
+.replace-row > label { font-weight:600; white-space:nowrap; }
+.replace-row input { flex:1 1 180px; min-width:100px; max-width:390px; padding:7px 9px; font:inherit; font-size:13px; color:var(--text,#24332d); border:1px solid var(--border,#dce4d8); border-radius:6px; background:var(--surface-2,#fff); }
+.replace-row button { font-size:13px; min-height:30px; }
+#replace-note { color:var(--muted,#758076); flex:1 1 300px; line-height:1.5; overflow-wrap:anywhere; }
