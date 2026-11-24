@@ -154,7 +154,7 @@ export function bindFindPanel({ getContext, prepareReplace, applyReplace, onErro
     const target = getContext();
     const sourceText = target?.source?.value;
     if (!target || target.mode === 'visual' || typeof sourceText !== 'string' || !input.value || !matches.length) return;
-    const replacement = replaceInput.value.replace(/\\r\\n?/g, '\\n');
+    const replacement = replaceInput.value.replace(/\r\n?/g, '\n');
     try {
       const result = all
         ? replaceAllLiteral(sourceText, input.value, replacement, { caseSensitive: matchCase.checked })
