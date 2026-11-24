@@ -1,6 +1,7 @@
 import './tauri-bridge.mjs';
 import { bindEncodingMenu } from './encoding-menu.mjs';
 import { bindComparison } from './comparison.mjs';
+import { bindFindPanel } from './find-panel.mjs';
 import { documentStats } from './document-stats.mjs';
 import { icon } from './icons.mjs';
 import { bindWorkbench } from './workbench.mjs';
@@ -69,7 +70,7 @@ let newFileSide = 'left';
 const source = $('source');
 SuperMarkdownCode.attach(source);
 SuperMarkdownCode.attach($('right-source'));
-let workbench, encodingMenu, comparison;
+let workbench, encodingMenu, comparison, findPanel;
 const doc = () => documents[activeIndex];
 const focusedDoc = () => activePane === 'right' ? secondary?.document : doc();
 const richRoot = () => document.querySelector('.vditor-wysiwyg > .vditor-reset');
@@ -673,7 +674,7 @@ function capture() {
 
 function updateUI() {
   folderFollower.follow();
-  workbench?.update(); encodingMenu?.update(); comparison?.update();
+  workbench?.update(); encodingMenu?.update(); comparison?.update(); findPanel?.refresh();
   source.codeEditor.setContext(doc()).catch(showError);
   const active = focusedDoc();
   const viewMode = activePane === 'right' ? secondary?.mode : mode;
@@ -796,6 +797,7 @@ function render({ focus = true } = {}) {
   loading = false;
   syncSecondary();
   updateUI();
+  findPanel?.refresh(true);
 }
 
 function setMode(next) {
@@ -970,7 +972,28 @@ workbench = bindWorkbench({ preferences: startup.preferences, setMode, setLayout
   getEditor: () => (activePane === 'right' ? $('right-source') : source).codeEditor,
   getDocument: focusedDoc, getMode: () => activePane === 'right' ? secondary?.mode : mode,
   compareFiles: () => comparison.open(), canCompare: () => !$('compare-files').disabled,
-  getLayout: () => layout, closeCurrent: () => focusedDoc() && closeDocuments([focusedDoc().key]), onError: showError });
+  getLayout: () => layout, closeCurrent: () => focusedDoc() && closeDocuments([focusedDoc().key]),
+  findCurrent: () => findPanel?.open(), onError: showError });
+
+findPanel = bindFindPanel({
+  getContext: () => {
+    const item = focusedDoc();
+    if (!item) return null;
+    const right = activePane === 'right' && Boolean(secondary);
+    const currentMode = right ? secondary.mode : mode;
+    return {
+      key: item.key, side: right ? 'right' : 'left', mode: currentMode,
+      source: right ? secondary.source : source,
+      root: currentMode === 'visual' ? (right ? secondary.root : richRoot()) : null,
+      focus: () => {
+        if (right) secondary.focus();
+        else if (currentMode === 'visual') engine?.focus();
+        else source.focus();
+      },
+    };
+  },
+  onError: showError,
+});
 
 const cdn = new URL(window.__TAURI__ ? './vendor/vditor' : '../../node_modules/vditor', location.href).href;
 function bindEditorControls(root = richRoot(), viewEngine = engine, getDocument = doc, side = 'left') {
