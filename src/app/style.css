@@ -353,3 +353,21 @@ main { border-radius:12px 12px 0 0; }
 #comparison-dialog .comparison-note { color:var(--muted); font-size:12px; line-height:1.5; padding:8px 16px; margin:0; border-top:1px solid var(--border); }
 .app-menu { max-height:calc(100vh - 110px); overflow-y:auto; }
 @media(max-width:1000px) { .comparison-toolbar { gap:6px; padding:10px; flex-wrap:wrap; } footer { gap:8px; padding-left:12px; padding-right:12px; } #word-count { font-size:10px; } }
+
+
+/* Issue #8：独立查找工具条，不更改文档 DOM 或编辑历史。 */
+.find-panel { display:flex; align-items:center; gap:10px; flex-shrink:0; flex-wrap:wrap; min-height:48px; padding:7px 14px; border-bottom:1px solid var(--border,#dce4d8); background:var(--surface,#fff); font-size:12px; }
+.find-panel > label:first-child { font-weight:600; white-space:nowrap; }
+.find-panel input[type=search] { flex:1 1 180px; width:240px; max-width:390px; min-width:100px; padding:7px 9px; font:inherit; font-size:13px; color:var(--text,#24332d); border:1px solid var(--border,#dce4d8); border-radius:6px; background:var(--surface-2,#fff); }
+.find-panel input[type=search]:focus-visible { outline:2px solid var(--accent,#407b5f); outline-offset:1px; }
+.find-panel #find-summary { min-width:76px; color:var(--muted,#758076); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.find-panel .find-case { display:flex; gap:5px; align-items:center; white-space:nowrap; cursor:pointer; }
+.find-panel .find-case input { accent-color:var(--accent,#407b5f); }
+.find-panel button { padding:4px 10px; min-width:30px; font-size:16px; border:1px solid var(--border,#dce4d8); border-radius:5px; }
+.find-panel button:hover:not(:disabled) { background:var(--tint,#edf3eb); }
+.find-panel #find-close { margin-left:auto; }
+.cm-find-match { background:rgba(244,189,69,.3); border-radius:2px; }
+.cm-find-current { background:rgba(244,171,54,.55); outline:1px solid rgba(173,115,24,.85); border-radius:2px; }
+::highlight(supermarkdown-find-all) { background-color:rgba(244,189,69,.32); }
+::highlight(supermarkdown-find-current) { background-color:rgba(244,171,54,.63); color:inherit; }
+@media(max-width:900px) { .find-panel { gap:6px; } .find-panel input[type=search] { flex-basis:150px; } .find-panel #find-close { margin-left:0; } }
