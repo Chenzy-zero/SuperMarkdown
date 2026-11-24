@@ -50,6 +50,15 @@
         <div class="document-identity"><strong id="editor-title">开始写作</strong><span id="editor-hint">新建文档，或打开本地文件和文件夹。</span></div>
         <button id="compare-files" title="比较左右文档（包含未保存内容）" disabled>比较左右文档</button>
       </div>
+      <div id="find-panel" class="find-panel" role="search" aria-label="当前文档查找" hidden>
+        <label for="find-input">查找</label>
+        <input id="find-input" type="search" maxlength="256" autocomplete="off" spellcheck="false" placeholder="输入文字，在当前文档中查找" aria-label="查找关键词">
+        <span id="find-summary" role="status" aria-live="polite">输入关键词</span>
+        <label class="find-case"><input id="find-case" type="checkbox"> 区分大小写</label>
+        <button id="find-prev" type="button" title="上一处 Shift+Enter" disabled>↑</button>
+        <button id="find-next" type="button" title="下一处 Enter" disabled>↓</button>
+        <button id="find-close" type="button" aria-label="关闭查找" title="关闭查找 Esc">×</button>
+      </div>
       <div class="editor-area" id="editors" data-layout="single">
         <section id="left-pane" class="editor-pane active-pane"><div class="pane-heading" hidden><span id="left-pane-name">左侧</span></div><div class="pane-content"><div id="empty-state" hidden>从左侧选择文件，或打开一个本地文件夹开始。</div><div id="rich"></div><div id="source" aria-label="Markdown 源码" hidden></div></div></section>
         <div id="pane-divider" role="separator" aria-label="调整左右正文宽度" aria-orientation="vertical" aria-controls="left-pane right-pane" tabindex="0" title="拖动调整左右宽度，双击恢复等宽"></div>
