@@ -356,6 +356,7 @@ main { border-radius:12px 12px 0 0; }
 
 
 /* Issue #8：独立查找工具条，不更改文档 DOM 或编辑历史。 */
+.find-panel[hidden] { display: none; }
 .find-panel { display:flex; align-items:center; gap:10px; flex-shrink:0; flex-wrap:wrap; min-height:48px; padding:7px 14px; border-bottom:1px solid var(--border,#dce4d8); background:var(--surface,#fff); font-size:12px; }
 .find-panel > label:first-child { font-weight:600; white-space:nowrap; }
 .find-panel input[type=search] { flex:1 1 180px; width:240px; max-width:390px; min-width:100px; padding:7px 9px; font:inherit; font-size:13px; color:var(--text,#24332d); border:1px solid var(--border,#dce4d8); border-radius:6px; background:var(--surface-2,#fff); }
