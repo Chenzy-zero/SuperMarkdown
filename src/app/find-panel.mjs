@@ -203,10 +203,12 @@ export function bindFindPanel({ getContext, prepareReplace, applyReplace, onErro
   nextButton.onclick = () => navigate(1);
   $('find-close').onclick = () => close();
   replaceInput.addEventListener('keydown', event => {
+    if (event.isComposing || event.keyCode === 229) return;
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
     if (event.key === 'Enter') { event.preventDefault(); runReplace(event.ctrlKey || event.metaKey); }
   });
   input.addEventListener('keydown', event => {
+    if (event.isComposing || event.keyCode === 229) return;
     if (event.key === 'Enter') { event.preventDefault(); navigate(event.shiftKey ? -1 : 1); }
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
   });
