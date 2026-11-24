@@ -840,6 +840,8 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape') { $('tab-menu').hidden = true; $('file-menu').hidden = true; clearLinkPreview(); }
   if (!(event.ctrlKey || event.metaKey) || event.isComposing) return;
   const key = event.key.toLowerCase();
+  // 查找输入框里的 Ctrl+Z/Y 属于查询文字编辑，不应触发文档撤销/重做。
+  if ((key === 'z' || key === 'y') && event.target?.closest?.('#find-panel')) return;
   if (['s', 'o', 'n'].includes(key)) {
     event.preventDefault(); event.stopImmediatePropagation();
     if (key === 's') saveDocument(focusedDoc(), event.shiftKey);
