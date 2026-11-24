@@ -1,4 +1,5 @@
 import { findMatches } from './find-matches.mjs';
+import { replaceAt, replaceAllLiteral } from './replace-text.mjs';
 
 const ALL_MARKS = 'supermarkdown-find-all';
 const CURRENT_MARK = 'supermarkdown-find-current';
@@ -37,11 +38,13 @@ function makeRange(entries, match) {
   return range;
 }
 
-export function bindFindPanel({ getContext, onError }) {
+export function bindFindPanel({ getContext, prepareReplace, applyReplace, onError }) {
   const $ = id => document.getElementById(id);
   const panel = $('find-panel'), input = $('find-input'), summary = $('find-summary');
   const prevButton = $('find-prev'), nextButton = $('find-next');
   const matchCase = $('find-case');
+  const replaceRow = $('replace-row'), replaceInput = $('replace-input');
+  const replaceOne = $('replace-one'), replaceAll = $('replace-all'), replaceNote = $('replace-note');
   let matches = [], ranges = [], index = 0, context = null, timer = null, markedHost = null;
   let lastIdentity = '', lastQuery = '', lastText = '', lastCase = false, lastFirstNode = null;
 
@@ -78,6 +81,7 @@ export function bindFindPanel({ getContext, onError }) {
       : !matches.length ? '0 处匹配'
       : String(index + 1) + ' / ' + matches.length + (matches.length === 2000 ? '（仅前 2000 处）' : '');
     prevButton.disabled = nextButton.disabled = !matches.length;
+    replaceOne.disabled = replaceAll.disabled = !matches.length || context?.mode === 'visual';
   }
 
   function scrollCurrent() {
@@ -128,11 +132,58 @@ export function bindFindPanel({ getContext, onError }) {
     paint(); status(); scrollCurrent();
   }
 
-  function open() {
+  function open({ replace = false } = {}) {
     if (document.querySelector('dialog[open]')) return;
+    // 可视 DOM 的查找偏移不能直接用于修改 Markdown 源码。
+    // 先切换到源码视图后再启用替换，避免损坏表格、链接和格式标记。
+    if (replace && !prepareReplace?.()) return;
+    replaceRow.hidden = !replace;
+    replaceNote.textContent = replace
+      ? '替换作用于当前文档的 Markdown 源码或纯文本；仅修改内存，按 Ctrl+S 保存。'
+      : '';
     panel.hidden = false;
     update({ force: true, scroll: true });
     input.focus(); input.select();
+  }
+
+  function runReplace(all = false) {
+    if (panel.hidden || replaceRow.hidden || document.querySelector('dialog[open]')) return;
+    if (!prepareReplace?.()) return;
+    // 点击按钮前强制更新：不会用过期的匹配位置修改已经变化的文档。
+    update({ force: true });
+    const target = getContext();
+    const sourceText = target?.source?.value;
+    if (!target || target.mode === 'visual' || typeof sourceText !== 'string' || !input.value || !matches.length) return;
+    const replacement = replaceInput.value.replace(/\\r\\n?/g, '\\n');
+    try {
+      const result = all
+        ? replaceAllLiteral(sourceText, input.value, replacement, { caseSensitive: matchCase.checked })
+        : replaceAt(sourceText, matches[index], replacement);
+      if (!result.count || result.text === sourceText) {
+        replaceNote.textContent = '替换后没有内容变化。';
+        return;
+      }
+      const applied = applyReplace?.({
+        key: target.key, side: target.side, expected: sourceText,
+        text: result.text, caret: result.caret,
+      });
+      if (!applied) {
+        replaceNote.textContent = '文档状态已变化，请重新查找后再试。';
+        refresh(true);
+        return;
+      }
+      update({ force: true });
+      if (matches.length) {
+        const next = matches.findIndex(match => match.from >= result.caret);
+        index = next < 0 ? 0 : next;
+        paint(); status(); scrollCurrent();
+      }
+      replaceNote.textContent = '已替换 ' + result.count + ' 处（可用 Ctrl+Z 撤销）。';
+      input.focus();
+    } catch (error) {
+      replaceNote.textContent = error.message || '替换失败。';
+      onError(error);
+    }
   }
 
   function close({ returnFocus = true } = {}) {
@@ -144,23 +195,31 @@ export function bindFindPanel({ getContext, onError }) {
     if (returnFocus) getContext()?.focus?.();
   }
 
-  input.addEventListener('input', () => refresh());
+  input.addEventListener('input', () => { replaceNote.textContent = ''; refresh(); });
   matchCase.addEventListener('change', () => refresh());
+  replaceOne.onclick = () => runReplace(false);
+  replaceAll.onclick = () => runReplace(true);
   prevButton.onclick = () => navigate(-1);
   nextButton.onclick = () => navigate(1);
   $('find-close').onclick = () => close();
+  replaceInput.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
+    if (event.key === 'Enter') { event.preventDefault(); runReplace(event.ctrlKey || event.metaKey); }
+  });
   input.addEventListener('keydown', event => {
     if (event.key === 'Enter') { event.preventDefault(); navigate(event.shiftKey ? -1 : 1); }
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
   });
   document.addEventListener('keydown', event => {
     if (event.isComposing) return;
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'f') {
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey
+      && ['f', 'h'].includes(event.key.toLowerCase())) {
       if (document.querySelector('dialog[open]')) return;
-      event.preventDefault(); event.stopImmediatePropagation(); open();
+      event.preventDefault(); event.stopImmediatePropagation();
+      open({ replace: event.key.toLowerCase() === 'h' });
     } else if (event.key === 'Escape' && !panel.hidden) {
       event.preventDefault(); event.stopImmediatePropagation(); close();
     }
   }, true);
-  return { open, close, refresh, get isOpen() { return !panel.hidden; } };
+  return { open, openReplace: () => open({ replace: true }), close, refresh, get isOpen() { return !panel.hidden; } };
 }
