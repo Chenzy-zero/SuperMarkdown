@@ -58,6 +58,13 @@
         <button id="find-prev" type="button" title="上一处 Shift+Enter" disabled>↑</button>
         <button id="find-next" type="button" title="下一处 Enter" disabled>↓</button>
         <button id="find-close" type="button" aria-label="关闭查找" title="关闭查找 Esc">×</button>
+        <div id="replace-row" class="replace-row" hidden>
+          <label for="replace-input">替换为</label>
+          <input id="replace-input" type="text" maxlength="20000" spellcheck="false" autocomplete="off" placeholder="替换文本（支持空字符串）" aria-label="替换为">
+          <button id="replace-one" type="button" disabled title="替换当前匹配项">替换</button>
+          <button id="replace-all" type="button" disabled title="全部替换（最多 2000 处，作为一次撤销）">全部替换</button>
+          <span id="replace-note" role="status" aria-live="polite"></span>
+        </div>
       </div>
       <div class="editor-area" id="editors" data-layout="single">
         <section id="left-pane" class="editor-pane active-pane"><div class="pane-heading" hidden><span id="left-pane-name">左侧</span></div><div class="pane-content"><div id="empty-state" hidden>从左侧选择文件，或打开一个本地文件夹开始。</div><div id="rich"></div><div id="source" aria-label="Markdown 源码" hidden></div></div></section>
