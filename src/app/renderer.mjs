@@ -975,9 +975,48 @@ workbench = bindWorkbench({ preferences: startup.preferences, setMode, setLayout
   getDocument: focusedDoc, getMode: () => activePane === 'right' ? secondary?.mode : mode,
   compareFiles: () => comparison.open(), canCompare: () => !$('compare-files').disabled,
   getLayout: () => layout, closeCurrent: () => focusedDoc() && closeDocuments([focusedDoc().key]),
-  findCurrent: () => findPanel?.open(), onError: showError });
+  findCurrent: () => findPanel?.open(), replaceCurrent: () => findPanel?.openReplace(), onError: showError });
 
 findPanel = bindFindPanel({
+  prepareReplace: () => {
+    const item = focusedDoc();
+    if (!item || item.saving || composing || secondary?.composing) return false;
+    // 同篇 Markdown 左可视/右源码的同步布局，替换始终从右侧源码执行。
+    if (layout === 'sync' && activePane === 'left') focusPane('right');
+    else if (activePane === 'right' && item.kind === 'markdown' && secondary?.mode === 'visual') secondary.setMode('source');
+    else if (activePane === 'left' && item.kind === 'markdown' && mode === 'visual') setMode('source');
+    return (activePane === 'right' ? secondary?.mode : mode) !== 'visual';
+  },
+  applyReplace: ({ key, side, expected, text, caret }) => {
+    const item = focusedDoc();
+    const right = activePane === 'right';
+    const host = right ? secondary?.source : source;
+    if (!item || item.key !== key || side !== (right ? 'right' : 'left')
+      || item.saving || composing || secondary?.composing
+      || (right ? secondary?.mode : mode) === 'visual') return false;
+    // 捕获此前输入，再以当前缓冲区快照做乐观检查，拒绝在旧偏移上替换。
+    capture(); secondary?.capture();
+    const original = item.history.current.markdown.replace(/\r\n?/g, '\n');
+    if (host?.value !== expected || original !== expected || text === expected) return false;
+    const normalized = text.replace(/\r\n?/g, '\n');
+    const lineEnding = item.lineEnding || '\n';
+    const updated = normalized.replace(/\n/g, lineEnding);
+    const rawCaret = normalized.slice(0, caret).replace(/\n/g, lineEnding).length;
+    // group=null + 两侧 closeGroup：无论是否连续输入，全部替换独占一条 Undo。
+    item.history.closeGroup();
+    if (!item.history.record(updated, rawCaret, null)) return false;
+    item.history.closeGroup();
+    if (right) {
+      secondary.state.caret = rawCaret;
+      secondary.refresh({ force: true });
+      if (item === doc()) render({ focus: false });
+      else updateUI();
+    } else {
+      render({ focus: false });
+    }
+    scheduleRecovery();
+    return true;
+  },
   getContext: () => {
     const item = focusedDoc();
     if (!item) return null;
