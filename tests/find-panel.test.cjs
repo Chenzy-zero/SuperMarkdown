@@ -97,3 +97,10 @@ test('Ctrl+F 的本地查找、前后导航、大小写、关闭及文件切换�
     if (priorCSS === undefined) delete globalThis.CSS; else globalThis.CSS = priorCSS;
   }
 });
+
+test('查找工具条 hidden 属性不会被 display:flex 覆盖', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const css = fs.readFileSync(path.join(__dirname, '../src/app/style.css'), 'utf8');
+  assert.match(css, /\.find-panel\[hidden\]\s*\{\s*display:\s*none\s*;/);
+});
