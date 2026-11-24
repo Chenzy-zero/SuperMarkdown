@@ -1,8 +1,8 @@
 import { MergeView } from '@codemirror/merge';
 import formats from '../app/encoding-formats.json';
 export { formats };
-import { EditorState, EditorSelection, Compartment, StateEffect } from '@codemirror/state';
-import { EditorView, keymap, lineNumbers, drawSelection, highlightActiveLine } from '@codemirror/view';
+import { EditorState, EditorSelection, Compartment, StateEffect, StateField } from '@codemirror/state';
+import { EditorView, keymap, lineNumbers, drawSelection, highlightActiveLine, Decoration } from '@codemirror/view';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { bracketMatching, syntaxHighlighting, HighlightStyle, LanguageDescription } from '@codemirror/language';
 import { languages } from '@codemirror/language-data';
@@ -16,12 +16,26 @@ const colors = HighlightStyle.define([
   { tag: [tags.heading, tags.strong], class: 'tok-keyword' },
 ]);
 
+// 只更新 CodeMirror 视图装饰；不派发 docChanged，也不写入应用文档历史。
+const searchDecorationEffect = StateEffect.define();
+const searchDecorations = StateField.define({
+  create: () => Decoration.none,
+  update(decorations, transaction) {
+    if (transaction.docChanged) decorations = Decoration.none;
+    for (const effect of transaction.effects) {
+      if (effect.is(searchDecorationEffect)) decorations = effect.value;
+    }
+    return decorations;
+  },
+  provide: field => EditorView.decorations.from(field),
+});
+
 export function attach(host) {
   const language = new Compartment(), theme = new Compartment(), wrapping = new Compartment();
   let quiet = false, context = '', sequence = 0, batch = false;
   const notify = () => host.dispatchEvent(new CustomEvent('editor-state', { bubbles: true }));
   const view = new EditorView({ parent: host, state: EditorState.create({ extensions: [
-    EditorState.allowMultipleSelections.of(true), lineNumbers(), drawSelection(), highlightActiveLine(), bracketMatching(),
+    EditorState.allowMultipleSelections.of(true), lineNumbers(), drawSelection(), highlightActiveLine(), bracketMatching(), searchDecorations,
     keymap.of([{ key: 'Escape', run: () => { if (!batch && view.state.selection.ranges.length === 1) return false; cancel(); return true; } }, ...defaultKeymap, indentWithTab]),
     syntaxHighlighting(colors), language.of([]), wrapping.of([]), theme.of(EditorView.theme({}, { dark: false })),
     EditorView.updateListener.of(update => {
@@ -54,6 +68,22 @@ export function attach(host) {
   appearance();
   host.codeEditor = {
     view, cancel, get batch() { return batch; }, get cursors() { return view.state.selection.ranges.length; },
+    setSearchHighlights(matches, currentIndex = -1) {
+      const max = view.state.doc.length;
+      const marks = (matches || []).flatMap((match, index) =>
+        match.from >= 0 && match.to > match.from && match.to <= max
+          ? [Decoration.mark({ class: index === currentIndex ? 'cm-find-current' : 'cm-find-match' }).range(match.from, match.to)]
+          : []);
+      view.dispatch({ effects: searchDecorationEffect.of(Decoration.set(marks, true)) });
+    },
+    navigateSearch(from, to) {
+      const max = view.state.doc.length;
+      if (from < 0 || to > max || from >= to) return;
+      view.dispatch({
+        selection: { anchor: from, head: to },
+        effects: EditorView.scrollIntoView(from, { y: 'center' }),
+      });
+    },
     toggleLineTyping() {
       if (batch) { cancel(); view.focus(); return; }
       const doc = view.state.doc, starts = new Set();
