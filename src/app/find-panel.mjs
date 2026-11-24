@@ -60,7 +60,8 @@ export function bindFindPanel({ getContext, onError }) {
     if (context.mode === 'visual') {
       if (!globalThis.CSS?.highlights || typeof Highlight === 'undefined') return;
       try {
-        if (ranges.length) CSS.highlights.set(ALL_MARKS, new Highlight(...ranges));
+        const validRanges = ranges.filter(Boolean);
+        if (validRanges.length) CSS.highlights.set(ALL_MARKS, new Highlight(...validRanges));
         if (ranges[index]) CSS.highlights.set(CURRENT_MARK, new Highlight(ranges[index]));
       } catch (error) { onError(error); }
     } else {
