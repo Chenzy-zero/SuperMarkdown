@@ -157,8 +157,7 @@ test('Ctrl+H 在源码模式替换一次或全部，保留 Ctrl+F 查找且不�
     assert.equal(prepared, 1);
 
     nodes['find-input'].value = 'abc';
-    nodes['replace-input'].value = '    nodes['replace-input'].value = '$&';
-    nodes['replace-all'].onclick();';
+    nodes['replace-input'].value = '$&';
     // 中文拼音候选上屏时 Enter 不能误触发替换。
     nodes['replace-input'].emit('keydown', { key: 'Enter', isComposing: true });
     nodes['replace-input'].emit('keydown', { key: 'Enter', keyCode: 229 });
