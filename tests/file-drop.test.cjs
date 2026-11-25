@@ -97,6 +97,7 @@ test('纯文本/链接拖动不拦截；打开对话框时拒绝文件拖入', a
     onError: error => errors.push(error),
   });
   const link = plain.event('left', ['text/uri-list']);
+  link.dataTransfer.files = [];
   plain.listeners.get('drop').fn(link);
   assert.equal(link.prevented, false);
   assert.equal(link.stopped, false);
