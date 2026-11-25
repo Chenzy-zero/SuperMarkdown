@@ -37,7 +37,7 @@ test('从已授权文档读取图片，不改写原始 Markdown 且防止 DOM �
     set src(value) { this.rendered = value; },
   });
   const managed = fake(path), external = fake('https://example.com/image.png');
-  const root = { querySelectorAll: () => [managed, external] };
+  const root = { querySelectorAll: () => [managed, external], contains: image => [managed, external].includes(image) };
   const requested = [], errors = [];
   const load = async args => {
     requested.push(args);
@@ -53,12 +53,20 @@ test('从已授权文档读取图片，不改写原始 Markdown 且防止 DOM �
   assert.equal(requested.length, 1, '相同 DOM 图片不应重复加载');
 
   const replaced = fake(path);
-  const asyncRoot = { querySelectorAll: () => [replaced] };
+  const asyncRoot = { querySelectorAll: () => [replaced], contains: image => image === replaced };
   await hydrateManagedImages(asyncRoot, 'known-key', async () => {
     replaced.isConnected = false;
     return { mime: 'image/png', bytes: [137, 80, 78, 71] };
   });
   assert.equal(replaced.rendered, undefined, '已被 Vditor 替换的节点不应被异步修改');
+  const stale = fake(path);
+  let stillActive = true;
+  const changingRoot = { querySelectorAll: () => [stale], contains: image => image === stale };
+  await hydrateManagedImages(changingRoot, 'known-key', async () => {
+    stillActive = false;
+    return { mime: 'image/png', bytes: [137, 80, 78, 71] };
+  }, () => {}, () => stillActive);
+  assert.equal(stale.rendered, undefined, '文档已切换后不得在复用的 DOM 节点中显示旧图');
 });
 
 
