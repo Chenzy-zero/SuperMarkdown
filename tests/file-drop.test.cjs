@@ -58,7 +58,7 @@ test('Tauri DOM drop 只记录目标，不重复处理文件；由原生 DragDro
   f.listeners.get('drop').fn(drop);
   assert.equal(drop.prevented, true);
   assert.equal(drop.stopped, true);
-  assert.deepEqual(targets, [{ side: 'right', x: 123, y: 456, nativeDrop: true }]);
+  assert.deepEqual(targets, [{ side: 'right', x: 123, y: 456, nativeDrop: true, blocked: false }]);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(opened.length, 0, 'Tauri 的 DOM 与 WindowEvent 不能重复导入');
   assert.equal(errors.length, 0);
