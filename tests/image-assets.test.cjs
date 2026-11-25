@@ -82,6 +82,34 @@ test('插入图片引用保留 Unicode 光标偏移与 CRLF；只修改内存文
   assert.throws(() => insertImageReference('hello', 2, path, '\r'), /换行/);
 });
 
+test('批量图片插入保留拖入顺序、原光标位置和 CRLF 偏移', async () => {
+  const { insertImageReferences } = await import('../src/app/image-assets.mjs');
+  const first = 'notes.assets/550e8400-e29b-41d4-a716-446655440001.png';
+  const second = 'notes.assets/550e8400-e29b-41d4-a716-446655440002.jpg';
+  const result = insertImageReferences('a🙂b\r\n第二行', 3, [first, second], '\r\n');
+  assert.equal(result.text,
+    'a🙂\r\n![图片](' + first + ')\r\n![图片](' + second + ')\r\nb\r\n第二行');
+  assert.equal(result.caret, ('a🙂\r\n![图片](' + first + ')\r\n![图片](' + second + ')\r\n').length);
+  assert.ok(result.text.indexOf(first) < result.text.indexOf(second));
+  assert.throws(() => insertImageReferences('', 0, [], '\\n'), /数量/);
+  assert.throws(() => insertImageReferences('', 0, [first, ...Array(128).fill(second)]), /数量/);
+});
+
+test('批量图片引用一次写入 DocumentHistory，撤销/重做不会拆散图片顺序', async () => {
+  const { insertImageReferences } = await import('../src/app/image-assets.mjs');
+  const { DocumentHistory } = await import('../src/app/history.mjs');
+  const one = 'notes.assets/550e8400-e29b-41d4-a716-446655440001.png';
+  const two = 'notes.assets/550e8400-e29b-41d4-a716-446655440002.png';
+  const history = new DocumentHistory('正文\n');
+  const before = history.current.markdown;
+  const batch = insertImageReferences(before, before.length, [one, two]);
+  history.record(batch.text, batch.caret, null);
+  history.closeGroup();
+  assert.equal(history.undo().markdown, before);
+  assert.equal(history.redo().markdown, batch.text);
+  assert.ok(history.current.markdown.indexOf(one) < history.current.markdown.indexOf(two));
+});
+
 test('图片插入可以作为一个独立 Undo/Redo 动作记录', async () => {
   const { insertImageReference } = await import('../src/app/image-assets.mjs');
   const { DocumentHistory } = await import('../src/app/history.mjs');
