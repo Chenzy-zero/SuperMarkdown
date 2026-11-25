@@ -30,7 +30,13 @@ struct WorkspaceState {
     opened_files: Mutex<HashMap<String, OpenedFile>>,
     known_roots: Mutex<HashSet<PathBuf>>,
     active_root: Mutex<Option<PathBuf>>,
-    pending_files: Mutex<Vec<PathBuf>>,
+    pending_files: Mutex<Vec<PendingPath>>,
+    pending_dropped_images: Mutex<HashMap<String, PathBuf>>,
+}
+
+struct PendingPath {
+    path: PathBuf,
+    drop_position: Option<(f64, f64)>,
 }
 
 #[derive(Clone)]
@@ -44,16 +50,20 @@ struct OpenedFile {
 
 impl WorkspaceState {
     fn queue_paths(&self, paths: Vec<PathBuf>) {
+        self.queue_paths_at(paths, None);
+    }
+
+    fn queue_paths_at(&self, paths: Vec<PathBuf>, drop_position: Option<(f64, f64)>) {
         if let Ok(mut pending) = self.pending_files.lock() {
             for path in paths {
-                if !pending.contains(&path) {
-                    pending.push(path);
+                if !pending.iter().any(|item| item.path == path && item.drop_position == drop_position) {
+                    pending.push(PendingPath { path, drop_position });
                 }
             }
         }
     }
 
-    fn take_paths(&self) -> Vec<PathBuf> {
+    fn take_paths(&self) -> Vec<PendingPath> {
         self.pending_files.lock().map(|mut value| std::mem::take(&mut *value)).unwrap_or_default()
     }
 }
@@ -735,18 +745,119 @@ fn active_folder(key: String, state: State<'_, WorkspaceState>) -> Result<Folder
 #[tauri::command]
 fn take_open_files(state: State<'_, WorkspaceState>) -> Vec<Value> {
     let mut results = Vec::new();
-    for path in state.take_paths() {
-        let result = if path.is_dir() {
-            create_folder_result(&state, &path)
+    for pending in state.take_paths() {
+        let path = pending.path;
+        let is_native_drop = pending.drop_position.is_some();
+        let drop_position = pending.drop_position
+            .map(|(x, y)| json!({ "x": x, "y": y }))
+            .unwrap_or(Value::Null);
+        let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let image_info = if is_native_drop {
+            image_assets::inspect_dropped_path(&path)
         } else {
-            with_file_folder(&state, &path).map(|value| json!({ "file": value.file, "folder": value.folder }))
+            Ok(None)
         };
-        match result {
-            Ok(value) => results.push(value),
-            Err(error) => results.push(json!({ "error": format!("无法打开 {}：{}", path.file_name().unwrap_or_default().to_string_lossy(), error) })),
+
+        match image_info {
+            Ok(Some((size, canonical))) => {
+                let token = Uuid::new_v4().to_string();
+                let stored = state.pending_dropped_images.lock().map(|mut images| {
+                    if images.len() >= 128 { return false; }
+                    images.insert(token.clone(), canonical);
+                    true
+                }).unwrap_or(false);
+                if stored {
+                    results.push(json!({
+                        "image": { "token": token, "name": name, "size": size },
+                        "dropPosition": drop_position
+                    }));
+                } else {
+                    results.push(json!({
+                        "error": "待处理图片过多，请分批拖入。",
+                        "dropPosition": drop_position
+                    }));
+                }
+            }
+            Err(error) => {
+                results.push(json!({
+                    "error": format!("无法导入图片 {name}：{error}"),
+                    "dropPosition": drop_position
+                }));
+            }
+            Ok(None) => {
+                let result = if path.is_dir() {
+                    create_folder_result(&state, &path)
+                } else {
+                    with_file_folder(&state, &path)
+                        .map(|value| json!({ "file": value.file, "folder": value.folder }))
+                };
+                match result {
+                    Ok(mut value) => {
+                        if let Some(object) = value.as_object_mut() {
+                            object.insert("dropPosition".to_string(), drop_position);
+                        }
+                        results.push(value);
+                    }
+                    Err(error) => results.push(json!({
+                        "error": format!("无法打开 {name}：{error}"),
+                        "dropPosition": drop_position
+                    })),
+                }
+            }
         }
     }
     results
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportDroppedImagesRequest {
+    document_key: String,
+    tokens: Vec<String>,
+}
+
+#[tauri::command]
+fn import_dropped_images(
+    state: State<'_, WorkspaceState>,
+    request: ImportDroppedImagesRequest,
+) -> Result<Vec<Value>, String> {
+    if request.tokens.is_empty() || request.tokens.len() > 128 {
+        return Err("一次最多导入 128 张图片。".to_string());
+    }
+    let mut results = Vec::with_capacity(request.tokens.len());
+    for token in request.tokens {
+        let path = state.pending_dropped_images.lock()
+            .map_err(|_| "拖入图片状态不可用。".to_string())?
+            .remove(&token);
+        let result = match path {
+            Some(path) => image_assets::import_dropped_path(&state, &request.document_key, &path),
+            None => Err("拖入图片已过期，请重新拖入。".to_string()),
+        };
+        match result {
+            Ok(image) => results.push(json!({
+                "token": token,
+                "relativePath": image.relative_path,
+                "mime": image.mime
+            })),
+            Err(error) => results.push(json!({ "token": token, "error": error })),
+        }
+    }
+    Ok(results)
+}
+
+#[tauri::command]
+fn discard_dropped_images(
+    state: State<'_, WorkspaceState>,
+    tokens: Vec<String>,
+) -> Result<Value, String> {
+    if tokens.len() > 128 { return Err("图片请求数量无效。".to_string()); }
+    let mut pending = state.pending_dropped_images.lock()
+        .map_err(|_| "拖入图片状态不可用。".to_string())?;
+    let mut discarded = 0;
+    for token in tokens {
+        if pending.remove(&token).is_some() { discarded += 1; }
+    }
+    Ok(json!({ "discarded": discarded }))
 }
 
 #[tauri::command]
@@ -984,7 +1095,8 @@ fn main() {
             list, read, create_markdown, entry_action, file_action, describe_link,
             activate_link, write_recovery, read_recovery, approve_close,
             image_assets::import_image_bytes, image_assets::choose_image_and_import,
-            image_assets::read_image_asset
+            image_assets::read_image_asset,
+            import_dropped_images, discard_dropped_images
         ])
         .setup(|app| {
             app.state::<WorkspaceState>().queue_paths(initial_paths());
@@ -998,8 +1110,8 @@ fn main() {
                     let _ = window.emit("application:request-close", ());
                 }
             }
-            WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) => {
-                window.state::<WorkspaceState>().queue_paths(paths.clone());
+            WindowEvent::DragDrop(DragDropEvent::Drop { paths, position }) => {
+                window.state::<WorkspaceState>().queue_paths_at(paths.clone(), Some((position.x, position.y)));
                 let _ = window.emit("application:files-pending", ());
             }
             _ => {}
@@ -1011,6 +1123,23 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_drop_queue_preserves_target_coordinates_and_deduplicates_same_path() {
+        let state = WorkspaceState::default();
+        let first = PathBuf::from("first.png");
+        let second = PathBuf::from("notes.md");
+        state.queue_paths_at(vec![first.clone(), second.clone()], Some((120.0, 240.0)));
+        state.queue_paths_at(vec![first.clone()], Some((120.0, 240.0)));
+        state.queue_paths(vec![first.clone()]);
+        let pending = state.take_paths();
+        assert_eq!(pending.len(), 3);
+        assert_eq!(pending[0].path, first);
+        assert_eq!(pending[0].drop_position, Some((120.0, 240.0)));
+        assert_eq!(pending[1].path, second);
+        assert_eq!(pending[1].drop_position, Some((120.0, 240.0)));
+        assert_eq!(pending[2].drop_position, None);
+    }
 
     #[test]
     fn utf8_and_utf16_round_trip_with_bom() {

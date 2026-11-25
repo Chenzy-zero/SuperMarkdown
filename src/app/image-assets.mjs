@@ -1,3 +1,24 @@
+// Insert an ordered batch at one source offset. The helper normalizes offsets
+// to LF internally and restores the original document line ending exactly once.
+export function insertImageReferences(text, caret, relativePaths, lineEnding = '\n') {
+  if (!Array.isArray(relativePaths) || relativePaths.length < 1 || relativePaths.length > 128) {
+    throw new Error('图片数量无效，一次最多插入 128 张。');
+  }
+  if (!['\n', '\r\n'].includes(lineEnding)) {
+    throw new Error('图片资源路径或换行方式无效。');
+  }
+  let next = String(text).replace(/\r\n?/g, '\n');
+  let at = Math.max(0, Math.min(next.length, caret));
+  for (const path of relativePaths) {
+    const inserted = insertImageReference(next, at, path, '\n');
+    next = inserted.text;
+    at = inserted.caret;
+  }
+  const restored = next.replace(/\n/g, lineEnding);
+  const restoredCaret = next.slice(0, at).replace(/\n/g, lineEnding).length;
+  return { text: restored, caret: restoredCaret };
+}
+
 // Load only the current document's managed <stem>.assets/UUID.ext images.
 // The backend independently checks the document key, canonical path, size and type.
 const ASSET_PATH = /^(?:\.\/)?[^\/\\?#]+\.assets\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.(?:png|jpg|gif|webp)$/i;

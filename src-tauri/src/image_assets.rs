@@ -3,8 +3,8 @@
 //! that document's own <stem>.assets directory.
 
 use std::{
-    fs::{self, OpenOptions},
-    io::Write,
+    fs::{self, File, OpenOptions},
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::{OpenedFile, WorkspaceState};
 
-const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
+pub(crate) const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 const SEGMENT_ESCAPES: &AsciiSet = &CONTROLS
     .add(b' ')
     .add(b'#')
@@ -47,8 +47,8 @@ pub(crate) struct ReadImageRequest {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ImageImportResult {
-    relative_path: String,
-    mime: &'static str,
+    pub(crate) relative_path: String,
+    pub(crate) mime: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -60,7 +60,7 @@ pub(crate) struct ImageReadResult {
 
 // No SVG / HTML / PDF. A magic header, not a caller-provided extension or
 // MIME string, determines the stored type. WebView2 still performs decoding.
-fn detect_image(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
+pub(crate) fn detect_image(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         Some(("png", "image/png"))
     } else if bytes.len() >= 3 && bytes.starts_with(&[0xff, 0xd8, 0xff]) {
@@ -147,6 +147,70 @@ fn publish_new_file(temporary: &Path, destination: &Path) -> std::io::Result<()>
 fn publish_new_file(temporary: &Path, destination: &Path) -> std::io::Result<()> {
     fs::hard_link(temporary, destination)?;
     fs::remove_file(temporary)
+}
+
+// Inspect an OS-dropped path without exposing it to the renderer. Only real
+// regular files with a supported image signature are classified as images.
+pub(crate) fn inspect_dropped_path(path: &Path) -> Result<Option<(u64, PathBuf)>, String> {
+    let image_extension = path.extension().and_then(|value| value.to_str())
+        .map(|value| matches!(value.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp"))
+        .unwrap_or(false);
+    let info = match fs::symlink_metadata(path) {
+        Ok(info) => info,
+        Err(error) if image_extension => return Err(error.to_string()),
+        Err(_) => return Ok(None),
+    };
+    if info.file_type().is_symlink() {
+        if image_extension {
+            return Err("拒绝导入符号链接图片，请直接拖入原始图片文件。".to_string());
+        }
+        return Ok(None);
+    }
+    if !info.is_file() { return Ok(None); }
+
+    let mut file = File::open(path).map_err(|error| error.to_string())?;
+    let mut header = [0_u8; 12];
+    let count = file.read(&mut header).map_err(|error| error.to_string())?;
+    let supported_header = detect_image(&header[..count]).is_some();
+    if !supported_header && !image_extension { return Ok(None); }
+    if info.len() > MAX_IMAGE_BYTES as u64 {
+        return Err(format!("图片 {} 超过 8 MiB，已拒绝导入。", path.file_name().unwrap_or_default().to_string_lossy()));
+    }
+    if !supported_header {
+        return Err(format!("图片 {} 的文件头无效，已拒绝导入。", path.file_name().unwrap_or_default().to_string_lossy()));
+    }
+    let canonical = dunce::canonicalize(path).map_err(|error| error.to_string())?;
+    Ok(Some((info.len(), canonical)))
+}
+
+// The token is created only from a native user-initiated DragDrop event.
+// Re-check the path and size immediately before reading, then reuse the exact
+// same document-scoped atomic asset writer as clipboard and picker imports.
+pub(crate) fn import_dropped_path(
+    state: &WorkspaceState, key: &str, path: &Path,
+) -> Result<ImageImportResult, String> {
+    let info = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+    if info.file_type().is_symlink() || !info.is_file() {
+        return Err("拖入的图片已变化，拒绝读取符号链接或非普通文件。".to_string());
+    }
+    if info.len() > MAX_IMAGE_BYTES as u64 {
+        return Err("图片超过 8 MiB，已拒绝导入。".to_string());
+    }
+    let canonical = dunce::canonicalize(path).map_err(|error| error.to_string())?;
+    if canonical.as_path() != path {
+        return Err("拖入的图片路径已变化，拒绝访问。".to_string());
+    }
+    let file = File::open(&canonical).map_err(|error| error.to_string())?;
+    let mut limited = file.take(MAX_IMAGE_BYTES as u64 + 1);
+    let mut bytes = Vec::with_capacity(info.len() as usize);
+    limited.read_to_end(&mut bytes).map_err(|error| error.to_string())?;
+    if bytes.len() > MAX_IMAGE_BYTES {
+        return Err("图片超过 8 MiB，已拒绝导入。".to_string());
+    }
+    if detect_image(&bytes).is_none() {
+        return Err("拖入文件的图片格式无效，仅支持 PNG、JPEG、GIF 或 WebP。".to_string());
+    }
+    import_bytes(state, key, &bytes)
 }
 
 fn import_bytes(state: &WorkspaceState, key: &str, bytes: &[u8])
@@ -276,6 +340,70 @@ mod tests {
             root: root.clone(), selected_encoding: None,
         });
         (state, root, key)
+    }
+
+    #[test]
+    fn dropped_images_are_classified_by_magic_and_imported_through_managed_assets() {
+        let (state, root, key) = fixture();
+        let result = (|| -> Result<(), String> {
+            let source = root.join("截图 中文.png");
+            let bytes = sample_png();
+            fs::write(&source, &bytes).map_err(|error| error.to_string())?;
+            let (size, canonical) = inspect_dropped_path(&source)?
+                .ok_or_else(|| "expected an image".to_string())?;
+            assert_eq!(size, bytes.len() as u64);
+            assert_eq!(canonical, dunce::canonicalize(&source).unwrap());
+            let imported = import_dropped_path(&state, &key, &canonical)?;
+            assert!(imported.relative_path.starts_with("%E4%B8%AD%E6%96%87%20"));
+            let read = read_bytes(&state, &ReadImageRequest {
+                document_key: key.clone(), relative_path: imported.relative_path,
+            })?;
+            assert_eq!(read.bytes, bytes);
+            Ok(())
+        })();
+        let _ = fs::remove_dir_all(root);
+        result.unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dropped_image_symlinks_are_rejected_before_import() {
+        let (state, root, key) = fixture();
+        let result = (|| -> Result<(), String> {
+            let source = root.join("source.png");
+            fs::write(&source, sample_png()).map_err(|error| error.to_string())?;
+            let link = root.join("linked.png");
+            std::os::unix::fs::symlink(&source, &link).map_err(|error| error.to_string())?;
+            assert!(inspect_dropped_path(&link).is_err());
+            assert!(import_dropped_path(&state, &key, &link).is_err());
+            Ok(())
+        })();
+        let _ = fs::remove_dir_all(root);
+        result.unwrap();
+    }
+
+    #[test]
+    fn dropped_file_classifier_keeps_text_files_and_rejects_bad_or_oversize_images() {
+        let (state, root, key) = fixture();
+        let result = (|| -> Result<(), String> {
+            let text = root.join("notes.txt");
+            fs::write(&text, "ordinary text").map_err(|error| error.to_string())?;
+            assert!(inspect_dropped_path(&text)?.is_none());
+
+            let fake = root.join("fake.png");
+            fs::write(&fake, b"not an image").map_err(|error| error.to_string())?;
+            assert!(inspect_dropped_path(&fake).is_err());
+
+            let huge = root.join("huge.webp");
+            let mut file = File::create(&huge).map_err(|error| error.to_string())?;
+            file.write_all(b"RIFFxxxxWEBP").map_err(|error| error.to_string())?;
+            file.set_len(MAX_IMAGE_BYTES as u64 + 1).map_err(|error| error.to_string())?;
+            assert!(inspect_dropped_path(&huge).is_err());
+            assert!(import_dropped_path(&state, &key, &huge).is_err());
+            Ok(())
+        })();
+        let _ = fs::remove_dir_all(root);
+        result.unwrap();
     }
 
     #[test]

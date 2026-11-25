@@ -32,6 +32,8 @@ if (!window.workspaceFiles && typeof invoke === "function") {
     chooseImageAndImport: documentKey => call("choose_image_and_import", { documentKey }),
     importImageBytes: request => call("import_image_bytes", { request }),
     readImageAsset: request => call("read_image_asset", { request }),
+    importDroppedImages: request => call("import_dropped_images", { request }),
+    discardDroppedImages: tokens => call("discard_dropped_images", { tokens }),
     // Native OS drag-and-drop is queued by the Rust window event handler.
     openDroppedFiles: async () => [],
     save: request => call("save", { request }),
