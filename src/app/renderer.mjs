@@ -17,6 +17,7 @@ import { bindPaneDivider } from './pane-divider.mjs';
 import { runStorageChecks } from './storage-checks.mjs';
 import { bindFileDrop } from './file-drop.mjs';
 import { hydrateManagedImages, insertImageReference } from './image-assets.mjs';
+import { bindImagePaste, imageClipboardBytes } from './image-paste.mjs';
 import { ActiveFolderFollower } from './active-folder.mjs';
 window.runPrototypeUXChecks = runUXChecks;
 window.runPrototypeWorkspaceChecks = runWorkspaceChecks;
@@ -418,8 +419,51 @@ async function saveDocument(item = focusedDoc(), saveAs = false, format = null) 
   return result;
 }
 
-// Issue #5: user-selected image is written only to an already opened Markdown
-// file's managed asset folder. The visible insertion is a separate undo step.
+// Images are always persisted by the Rust API before their Markdown reference
+// is inserted; never bypass the existing document history or save baseline.
+function commitManagedImage(item, inserted, {
+  side = activePane, expectedLayout = layout, expectedText = null, sourceCaret = null,
+} = {}) {
+  if (!item || focusedDoc() !== item || activePane !== side || layout !== expectedLayout
+    || composing || secondary?.composing || item.saving) {
+    throw new Error('插入期间文档、编辑区域或布局已变化；图片已保存但未插入，请返回原文档手动引用。');
+  }
+  if (expectedText !== null && item.history.current.markdown !== expectedText) {
+    throw new Error('插入期间文档内容已变化；图片已保存但未插入，未覆盖已有修改。');
+  }
+  // DOM offsets in rendered WYSIWYG are not Markdown offsets. Follow the
+  // source-only insertion policy of Issue #5, including sync split mode.
+  if (layout === 'sync' && activePane === 'left') focusPane('right');
+  else if (activePane === 'right' && secondary?.mode === 'visual') secondary.setMode('source');
+  else if (activePane === 'left' && mode === 'visual') setMode('source');
+  capture(); secondary?.capture();
+  const right = activePane === 'right';
+  const host = right ? secondary?.source : source;
+  if (!host || focusedDoc() !== item || !item.file) {
+    throw new Error('插入期间目标文档已失效，图片已保存但未插入。');
+  }
+  const current = host.value;
+  const existing = item.history.current.markdown.replace(/\r\n?/g, '\n');
+  if (current !== existing || (expectedText !== null && existing !== expectedText.replace(/\r\n?/g, '\n'))) {
+    throw new Error('插入期间编辑区内容已变化，请手动补充图片引用。');
+  }
+  const at = sourceCaret === null ? host.selectionStart : sourceCaret;
+  const { text, caret } = insertImageReference(
+    current, at, inserted.relativePath, item.lineEnding || '\n');
+  item.history.closeGroup();
+  if (!item.history.record(text, caret, null)) return;
+  item.history.closeGroup();
+  if (right) {
+    secondary.state.caret = caret;
+    secondary.refresh({ force: true });
+    if (item === doc()) render({ focus: false });
+    else updateUI();
+  } else render({ focus: false });
+  scheduleRecovery();
+  $('status').textContent = '已插入图片 · ' + inserted.relativePath + '（按 Ctrl+S 保存文档）';
+}
+
+// Issue #5: native picker imports images from the user's selected file.
 async function insertLocalImage() {
   const item = focusedDoc();
   if (!item || item.kind !== 'markdown' || item.saving || composing || secondary?.composing) return;
@@ -427,41 +471,89 @@ async function insertLocalImage() {
     showError(new Error('当前文件宿主不支持图片资产导入，请使用 Tauri 版本。'));
     return;
   }
-  // Unnamed files cannot have stable relative image paths.
   if (!item.file && !await saveDocument(item, true)) return;
   if (!item.file || focusedDoc() !== item) return;
+  const side = activePane, openedLayout = layout;
   try {
     const inserted = unwrap(await window.workspaceFiles.chooseImageAndImport(item.file.key));
     if (!inserted) return;
-    if (focusedDoc() !== item || !item.file) {
-      throw new Error('图片已保存到资产文件夹，但当前文档已切换。请返回原文档插入该图片链接。');
-    }
-    if (layout === 'sync' && activePane === 'left') focusPane('right');
-    else if (activePane === 'right' && secondary?.mode === 'visual') secondary.setMode('source');
-    else if (activePane === 'left' && mode === 'visual') setMode('source');
-    capture(); secondary?.capture();
-    const right = activePane === 'right';
-    const host = right ? secondary?.source : source;
-    if (!host || !focusedDoc() || focusedDoc() !== item) return;
-    const current = host.value;
-    if (current !== item.history.current.markdown.replace(/\r\n?/g, '\n')) {
-      throw new Error('文档内容在图片选择期间发生变化，请先完成当前编辑。');
-    }
-    const { text, caret } = insertImageReference(
-      current, host.selectionStart, inserted.relativePath, item.lineEnding || '\n');
-    item.history.closeGroup();
-    item.history.record(text, caret, null);
-    item.history.closeGroup();
-    if (right) {
-      secondary.state.caret = caret;
-      secondary.refresh({ force: true });
-      if (item === doc()) render({ focus: false });
-      else updateUI();
-    } else render({ focus: false });
-    scheduleRecovery();
-    $('status').textContent = '已插入图片 · ' + inserted.relativePath + '（按 Ctrl+S 保存文档）';
+    commitManagedImage(item, inserted, { side, expectedLayout: openedLayout });
   } catch (error) { showError(error); }
 }
+
+// Issue #6: screenshot clipboardData is captured from an actual paste event.
+// Only Markdown editor targets are intercepted; normal text clipboard paste
+// and paste into search/menus/dialogs retain the native behavior.
+const imagePasteBusy = new WeakSet();
+function imagePasteContext(event) {
+  if (document.querySelector('dialog[open]') || composing || secondary?.composing) return null;
+  const target = event.target;
+  if (!target?.closest?.('.cm-content, .vditor-reset')) return null;
+  const pane = target.closest('#left-pane, #right-pane');
+  if (!pane || pane.hidden) return null;
+  const side = pane.id === 'right-pane' ? 'right' : 'left';
+  if (side === 'right' && (layout === 'single' || !secondary?.initialized)) return null;
+  if (activePane !== side) focusPane(side);
+  if (side === 'right') secondary?.capture(); else capture();
+  const item = side === 'right' ? secondary?.document : doc();
+  if (!item || item.kind !== 'markdown') return null;
+  const currentMode = side === 'right' ? secondary.mode : mode;
+  const host = side === 'right' ? secondary.source : source;
+  const rawCaret = currentMode === 'visual'
+    ? side === 'right' ? secondary.state.caret : item.history.current.caret
+    : host.selectionStart;
+  const sourceCaret = currentMode === 'visual'
+    ? item.history.current.markdown.slice(0, rawCaret).replace(/\r\n/g, '\n').length
+    : rawCaret;
+  return {
+    item, side, layout, text: item.history.current.markdown,
+    sourceCaret, fileKey: item.file?.key || null,
+  };
+}
+
+async function pasteClipboardImage(image, context) {
+  const { item, side, fileKey } = context;
+  if (imagePasteBusy.has(item)) throw new Error('正在插入上一张截图，请完成后再粘贴。');
+  imagePasteBusy.add(item);
+  try {
+    const bytes = await imageClipboardBytes(image);
+    if (focusedDoc() !== item || activePane !== side || layout !== context.layout) {
+      throw new Error('剪贴板读取期间已切换文档，请返回原文档重新粘贴。');
+    }
+    if (item.history.current.markdown !== context.text) {
+      throw new Error('剪贴板读取期间文档已更新，请重新粘贴以免覆盖最新内容。');
+    }
+    if (typeof window.workspaceFiles?.importImageBytes !== 'function') {
+      throw new Error('当前文件宿主无法保存截图，请使用 Tauri 版本的“插入图片…”。');
+    }
+    // Require a stable document directory for relative paths.
+    if (!item.file && !await saveDocument(item, true)) return;
+    if (!item.file || !item.file.key || (fileKey && item.file.key !== fileKey)
+      || focusedDoc() !== item || activePane !== side || layout !== context.layout
+      || item.history.current.markdown !== context.text) {
+      throw new Error('保存或导入期间文档状态已变化，截图未写入 Markdown。');
+    }
+    const importedKey = item.file.key;
+    const result = unwrap(await window.workspaceFiles.importImageBytes({
+      documentKey: importedKey, bytes,
+    }));
+    if (item.file?.key !== importedKey) {
+      throw new Error('导入后文件身份发生变化，图片已保存但未插入。');
+    }
+    commitManagedImage(item, result, {
+      side, expectedLayout: context.layout, expectedText: context.text,
+      sourceCaret: context.sourceCaret,
+    });
+  } finally {
+    imagePasteBusy.delete(item);
+  }
+}
+
+bindImagePaste({
+  getContext: imagePasteContext,
+  pasteImage: pasteClipboardImage,
+  onError: showError,
+});
 
 async function scanExternalFiles(prompt = false) {
   if (scanning || composing || document.querySelector('dialog[open]')) return;
