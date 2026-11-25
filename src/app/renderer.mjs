@@ -16,7 +16,7 @@ import { runLayoutChecks } from './layout-checks.mjs';
 import { bindPaneDivider } from './pane-divider.mjs';
 import { runStorageChecks } from './storage-checks.mjs';
 import { bindFileDrop } from './file-drop.mjs';
-import { hydrateManagedImages, insertImageReference } from './image-assets.mjs';
+import { hydrateManagedImages, insertImageReferences } from './image-assets.mjs';
 import { bindImagePaste, imageClipboardBytes } from './image-paste.mjs';
 import { ActiveFolderFollower } from './active-folder.mjs';
 window.runPrototypeUXChecks = runUXChecks;
@@ -469,17 +469,11 @@ function commitManagedImages(item, insertedImages, {
     throw new Error('插入期间编辑区内容已变化，请手动补充图片引用。');
   }
 
-  // Build the complete batch in LF offsets, then restore the document's
-  // original line ending once. All images become one Undo/Redo transaction.
-  let next = current.replace(/\r\n?/g, '\n');
-  let caret = sourceCaret === null ? host.selectionStart : sourceCaret;
-  for (const image of insertedImages) {
-    const inserted = insertImageReference(next, caret, image.relativePath, '\n');
-    next = inserted.text;
-    caret = inserted.caret;
-  }
-  const text = next.replace(/\n/g, item.lineEnding || '\n');
-  const finalCaret = next.slice(0, caret).replace(/\n/g, item.lineEnding || '\n').length;
+  // Preserve the batch order and record every reference as one Undo/Redo edit.
+  const batch = insertImageReferences(
+    current, sourceCaret === null ? host.selectionStart : sourceCaret,
+    insertedImages.map(image => image.relativePath), item.lineEnding || '\n');
+  const { text, caret: finalCaret } = batch;
   item.history.closeGroup();
   if (!item.history.record(text, finalCaret, null)) return false;
   item.history.closeGroup();
