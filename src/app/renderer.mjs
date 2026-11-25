@@ -8,6 +8,7 @@ import { bindWorkbench } from './workbench.mjs';
 import { DocumentHistory } from './history.mjs';
 import { sample, compatibility, suggestedScale } from './samples.mjs';
 import { preserveProtectedBlocks, protectedBlocks } from './protected-blocks.mjs';
+import { visualCaretToSource, sourceCaretToVisual, renderedSelectionPrefix } from './markdown-caret.mjs';
 import { runUXChecks } from './ux-checks.mjs';
 import { runWorkspaceChecks } from './workspace-checks.mjs';
 import { SecondaryPane } from './secondary-pane.mjs';
@@ -967,15 +968,6 @@ async function refreshFolder() {
   finally { $('refresh-folder').disabled = false; }
 }
 
-function textCaret(root) {
-  const selection = getSelection();
-  if (!selection.rangeCount || !root.contains(selection.anchorNode)) return 0;
-  const range = selection.getRangeAt(0).cloneRange();
-  range.selectNodeContents(root);
-  range.setEnd(selection.anchorNode, selection.anchorOffset);
-  return range.toString().length;
-}
-
 function restoreTextCaret(root, offset) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let node;
@@ -998,25 +990,22 @@ function restoreTextCaret(root, offset) {
   getSelection().addRange(range);
 }
 
-// 仅验证普通段落定位；复杂语法、选区及不可渲染块的映射仍需进一步验证。
-function richCaretToMarkdown(root = richRoot(), item = doc()) {
-  const offset = textCaret(root);
-  const text = root.textContent.slice(0, offset);
-  const tail = text.slice(-24);
-  const markdown = item.history.current.markdown;
-  const position = tail ? markdown.indexOf(tail) : 0;
-  return position < 0 ? Math.min(offset, markdown.length) : position + tail.length;
+// Source Markdown is authoritative; a selection move or mode switch never
+// serializes a read-only rendered view. Repeated text is disambiguated by
+// occurrence order rather than a first-match String#indexOf.
+function richCaretToMarkdown(root = richRoot(), item = doc(), markdown = item?.history.current.markdown) {
+  if (!item) return 0;
+  const visiblePrefix = renderedSelectionPrefix(root, getSelection());
+  if (visiblePrefix === null) return item.history.current.caret;
+  return visualCaretToSource(markdown, visiblePrefix, item.history.current.caret);
 }
 
 function markdownCaretToRich(offset) {
+  const root = richRoot();
   const markdown = doc().history.current.markdown;
-  const before = markdown.slice(0, offset);
-  const tail = before.split('\n').at(-1).replace(/^\s{0,3}#{1,6}\s+/, '');
-  const text = richRoot().textContent;
-  const position = tail ? text.indexOf(tail) : 0;
-  restoreTextCaret(richRoot(), position < 0 ? 0 : position + tail.length);
+  const position = sourceCaretToVisual(markdown, root.textContent, offset);
+  restoreTextCaret(root, position);
 }
-
 function capture() {
   if (loading || !engine || !doc()) return;
   const before = doc().history.current.markdown;
@@ -1032,7 +1021,7 @@ function capture() {
     if (richDirty) {
       try {
         const markdown = preserveProtectedBlocks(doc().history.current.markdown, engine.getValue()).replace(/\r?\n/g, doc().lineEnding);
-        doc().history.record(markdown, richCaretToMarkdown(), 'visual');
+        doc().history.record(markdown, richCaretToMarkdown(richRoot(), doc(), markdown), 'visual');
       } catch (error) {
         richDirty = false;
         render();
