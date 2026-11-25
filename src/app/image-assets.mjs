@@ -5,8 +5,7 @@ const SAFE_MIME = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']
 const scheduled = new WeakMap();
 
 export function isManagedAssetPath(value) {
-  return typeof value === 'string' && value.length < 700
-    && !value.includes('..') && ASSET_PATH.test(value);
+  return typeof value === 'string' && value.length < 700 && ASSET_PATH.test(value);
 }
 
 export function toImageDataUrl(image) {
@@ -43,7 +42,7 @@ export function insertImageReference(text, caret, relativePath, lineEnding = '\n
 
 // This never changes Markdown or the editor history. It only gives WebView2 a
 // safe in-memory URL for an image that was explicitly stored under this file.
-export async function hydrateManagedImages(root, documentKey, load, onError = () => {}) {
+export async function hydrateManagedImages(root, documentKey, load, onError = () => {}, isCurrent = () => true) {
   if (!root || !documentKey || typeof load !== 'function') return;
   const tasks = [];
   for (const image of [...root.querySelectorAll('img')].slice(0, 128)) {
@@ -56,7 +55,8 @@ export async function hydrateManagedImages(root, documentKey, load, onError = ()
       try {
         const asset = await load({ documentKey, relativePath: path });
         if (asset?.error) throw new Error(asset.error);
-        if (!image.isConnected || image.getAttribute('src') !== path || scheduled.get(image) !== identity) return;
+        if (!image.isConnected || !root.contains(image) || !isCurrent()
+          || image.getAttribute('src') !== path || scheduled.get(image) !== identity) return;
         image.src = toImageDataUrl(asset);
         image.dataset.supermarkdownAsset = identity;
       } catch (error) {
