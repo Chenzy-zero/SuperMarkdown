@@ -1,4 +1,6 @@
 import { preserveProtectedBlocks } from './protected-blocks.mjs';
+import { preserveUnchangedTables } from './markdown-tables.mjs';
+import { visualCaretToSource, renderedSelectionPrefix } from './markdown-caret.mjs';
 
 // 第二个编辑视图只持有光标和滚动位置，文档及撤销记录仍由应用持有。
 export class SecondaryPane {
@@ -61,15 +63,20 @@ export class SecondaryPane {
     if (!this.initialized || !item || this.loading || this.composing) return;
     let changed = false;
     if (this.mode !== 'visual') {
-      this.state.caret = this.source.value.slice(0, this.source.selectionStart).replace(/\n/g, item.lineEnding).length;
+      const head = this.source.codeEditor?.view?.state?.selection?.main?.head ?? this.source.selectionStart;
+      this.state.caret = this.source.value.slice(0, head).replace(/\n/g, item.lineEnding).length;
       this.state.scrollTop = this.source.scrollTop;
       if (this.sourceDirty) changed = item.history.record(this.source.value.replace(/\n/g, item.lineEnding), this.state.caret, 'right-source');
     } else {
       this.state.visualScrollTop = this.root.scrollTop;
       if (this.richDirty) {
         try {
-          const markdown = preserveProtectedBlocks(item.history.current.markdown, this.editor.getValue()).replace(/\r?\n/g, item.lineEnding);
-          changed = item.history.record(markdown, item.history.current.caret, 'right-visual');
+          const markdown = preserveUnchangedTables(item.history.current.markdown, preserveProtectedBlocks(item.history.current.markdown, this.editor.getValue())).replace(/\r?\n/g, item.lineEnding);
+          const prefix = renderedSelectionPrefix(this.root, getSelection());
+          const caret = prefix === null ? this.state.caret
+            : visualCaretToSource(markdown, prefix, this.state.caret);
+          changed = item.history.record(markdown, caret, 'right-visual');
+          this.state.caret = caret;
         } catch (error) {
           this.richDirty = false; this.refresh({ force: true }); this.onError(error); return;
         }
