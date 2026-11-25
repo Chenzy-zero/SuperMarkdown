@@ -68,6 +68,7 @@ let layout = 'single';
 let newFileDirectory = '';
 let newFileRoot = null;
 const droppedRequests = [];
+let lastDropTarget = null;
 let newFileSide = 'left';
 const source = $('source');
 SuperMarkdownCode.attach(source);
@@ -572,6 +573,154 @@ bindImagePaste({
   pasteImage: pasteClipboardImage,
   onError: showError,
 });
+
+function dropPoint(position, physical = true) {
+  if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) return null;
+  const scale = physical ? (window.devicePixelRatio || 1) : 1;
+  return { x: position.x / scale, y: position.y / scale };
+}
+
+function sideAtDrop(position, fallback = 'left') {
+  const point = dropPoint(position, true) || (lastDropTarget
+    ? dropPoint(lastDropTarget, false) : null);
+  if (!point) return fallback;
+  const element = document.elementFromPoint(point.x, point.y);
+  const pane = element?.closest?.('#left-pane, #right-pane');
+  if (pane?.id === 'right-pane' && !pane.hidden) return 'right';
+  if (pane?.id === 'left-pane' && !pane.hidden) return 'left';
+  return fallback;
+}
+
+function placeRichCaret(root, point) {
+  let range = document.caretRangeFromPoint?.(point.x, point.y) || null;
+  if (!range) {
+    const position = document.caretPositionFromPoint?.(point.x, point.y);
+    if (position) {
+      range = document.createRange();
+      range.setStart(position.offsetNode, position.offset);
+      range.collapse(true);
+    }
+  }
+  if (!range || !root.contains(range.startContainer)) return false;
+  range.collapse(true);
+  const selection = getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return true;
+}
+
+function imageDropContext(position) {
+  if (document.querySelector('dialog[open]') || composing || secondary?.composing) return null;
+  const point = dropPoint(position, true) || (lastDropTarget
+    ? dropPoint(lastDropTarget, false) : null);
+  if (!point) return null;
+  const element = document.elementFromPoint(point.x, point.y);
+  const editor = element?.closest?.('.cm-content, .vditor-reset');
+  const pane = editor?.closest?.('#left-pane, #right-pane');
+  if (!editor || !pane || pane.hidden) return null;
+  const side = pane.id === 'right-pane' ? 'right' : 'left';
+  if (side === 'right' && (layout === 'single' || !secondary?.initialized)) return null;
+  focusPane(side);
+  const item = side === 'right' ? secondary?.document : doc();
+  if (!item || item.kind !== 'markdown' || item.saving) return null;
+  const currentMode = side === 'right' ? secondary.mode : mode;
+  const host = side === 'right' ? secondary.source : source;
+  let sourceCaret;
+  if (currentMode === 'visual') {
+    const root = side === 'right' ? secondary.root : richRoot();
+    if (!placeRichCaret(root, point)) return null;
+    if (side === 'right') {
+      secondary.capture();
+      const markdownCaret = richCaretToMarkdown(root, item);
+      secondary.state.caret = markdownCaret;
+      item.history.current.caret = markdownCaret;
+    } else capture();
+    const markdownCaret = richCaretToMarkdown(root, item);
+    sourceCaret = item.history.current.markdown.slice(0, markdownCaret).replace(/\r\n/g, '\n').length;
+  } else {
+    const view = host?.codeEditor?.view;
+    const position = view?.posAtCoords(point);
+    if (position === null || position === undefined) return null;
+    view.dispatch({ selection: { anchor: position } });
+    view.focus();
+    if (side === 'right') secondary.capture(); else capture();
+    sourceCaret = host.selectionStart;
+  }
+  return {
+    item, side, layout, text: item.history.current.markdown,
+    sourceCaret, fileKey: item.file?.key || null,
+  };
+}
+
+const imageDropBusy = new WeakSet();
+async function importDroppedImages(entries, position) {
+  const tokens = entries.map(entry => entry.image.token).filter(Boolean);
+  const discard = async () => {
+    if (tokens.length && typeof window.workspaceFiles?.discardDroppedImages === 'function') {
+      try { unwrap(await window.workspaceFiles.discardDroppedImages(tokens)); } catch {}
+    }
+  };
+  const context = imageDropContext(position);
+  if (!context) {
+    await discard();
+    showError(new Error('请将图片拖入 Markdown 编辑区域，并确保目标文档已打开。'));
+    return;
+  }
+  const { item, side } = context;
+  if (imageDropBusy.has(item)) {
+    await discard();
+    showError(new Error('该文档正在处理上一批图片，请稍后再拖入。'));
+    return;
+  }
+  imageDropBusy.add(item);
+  try {
+    if (!item.file && !await saveDocument(item, true)) return;
+    if (!item.file || item.kind !== 'markdown' || !item.file.key
+      || (context.fileKey && item.file.key !== context.fileKey)
+      || focusedDoc() !== item || activePane !== side || layout !== context.layout
+      || item.history.current.markdown !== context.text) {
+      throw new Error('保存期间目标文档或内容发生变化，图片尚未导入。');
+    }
+    if (typeof window.workspaceFiles?.importDroppedImages !== 'function') {
+      throw new Error('当前宿主不支持安全的原生图片拖入，请使用 Tauri 版本。');
+    }
+    const results = unwrap(await window.workspaceFiles.importDroppedImages({
+      documentKey: item.file.key, tokens,
+    }));
+    const byToken = new Map(results.map(result => [result.token, result]));
+    const inserted = [], failures = [];
+    for (const entry of entries) {
+      const image = entry.image;
+      const result = byToken.get(image.token);
+      if (!result) failures.push(image.name + '：未收到导入结果');
+      else if (result.error) failures.push(image.name + '：' + result.error);
+      else inserted.push({ relativePath: result.relativePath });
+    }
+    if (focusedDoc() !== item || activePane !== side || layout !== context.layout
+      || item.history.current.markdown !== context.text || item.file?.key !== context.fileKey && context.fileKey) {
+      if (inserted.length) {
+        throw new Error('拖入期间已切换文档或修改正文；' + inserted.length
+          + ' 张图片已安全保存到原文档资源目录，但未插入引用，请返回原文档手动引用。');
+      }
+      throw new Error('拖入期间文档状态已变化，未修改 Markdown。');
+    }
+    if (inserted.length) {
+      commitManagedImages(item, inserted, {
+        side, expectedLayout: context.layout, expectedText: context.text,
+        sourceCaret: context.sourceCaret,
+      });
+    }
+    if (failures.length) {
+      $('status').textContent = (inserted.length ? '已插入 ' + inserted.length + ' 张图片；' : '')
+        + failures.length + ' 张图片导入失败：' + failures.join('；');
+    }
+  } catch (error) {
+    showError(error);
+  } finally {
+    await discard();
+    imageDropBusy.delete(item);
+  }
+}
 
 async function scanExternalFiles(prompt = false) {
   if (scanning || composing || document.querySelector('dialog[open]')) return;
