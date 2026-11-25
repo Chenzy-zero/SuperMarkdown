@@ -3,21 +3,35 @@
 // paragraphs must not always send the cursor to the first paragraph.
 // Neither mapper rewrites the Markdown or relies on Vditor's serializer.
 
-function occurrencePositions(text, needle) {
-  const found = [];
-  if (!needle) return found;
-  for (let offset = 0; offset <= text.length - needle.length;) {
-    const index = text.indexOf(needle, offset);
+function occurrenceCount(text, needle) {
+  if (!needle) return 0;
+  let count = 0, from = 0;
+  while (from <= text.length - needle.length) {
+    const index = text.indexOf(needle, from);
     if (index < 0) break;
-    found.push(index);
-    offset = index + 1;
+    count++;
+    from = index + 1;
   }
-  return found;
+  return count;
+}
+
+function nthOccurrence(text, needle, rank) {
+  if (!needle || rank < 1) return -1;
+  let from = 0;
+  while (rank-- > 0) {
+    const index = text.indexOf(needle, from);
+    if (index < 0) return -1;
+    if (!rank) return index;
+    from = index + 1;
+  }
+  return -1;
 }
 
 function candidates(prefix) {
+  // Do not allocate a full-document substring or arrays of every match when a
+  // highly repetitive multi-MiB document is edited in rich mode.
   const lengths = [64, 48, 32, 24, 16, 12, 8, 6, 4, 3, 2, 1];
-  return [...new Set(lengths.filter(length => length <= prefix.length).concat(prefix.length))]
+  return [...new Set(lengths.filter(length => length <= prefix.length))]
     .sort((left, right) => right - left)
     .map(length => prefix.slice(-length))
     .filter(token => token.trim());
@@ -49,11 +63,9 @@ export function visualCaretToSource(markdown, visiblePrefix, previousOffset = 0)
   if (!prefix) return 0;
 
   for (const token of candidates(prefix)) {
-    const seen = occurrencePositions(prefix, token).length;
-    const positions = occurrencePositions(normalized, token);
-    if (positions.length >= seen && seen > 0) {
-      return sourceOffsetFromLf(source, positions[seen - 1] + token.length);
-    }
+    const seen = occurrenceCount(prefix, token);
+    const at = nthOccurrence(normalized, token, seen);
+    if (at >= 0) return sourceOffsetFromLf(source, at + token.length);
   }
   return Math.max(0, Math.min(source.length, previousOffset));
 }
@@ -66,9 +78,9 @@ export function sourceCaretToVisual(markdown, renderedText, sourceOffset) {
   if (!prefix) return 0;
 
   for (const token of candidates(prefix)) {
-    const seen = occurrencePositions(prefix, token).length;
-    const positions = occurrencePositions(visible, token);
-    if (positions.length >= seen && seen > 0) return positions[seen - 1] + token.length;
+    const seen = occurrenceCount(prefix, token);
+    const at = nthOccurrence(visible, token, seen);
+    if (at >= 0) return at + token.length;
   }
   return Math.max(0, Math.min(visible.length, position));
 }
