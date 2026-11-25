@@ -486,6 +486,8 @@ async function insertLocalImage() {
 // and paste into search/menus/dialogs retain the native behavior.
 const imagePasteBusy = new WeakSet();
 function imagePasteContext(event) {
+  // Legacy Electron host has no scoped binary import API; preserve its paste behavior.
+  if (typeof window.workspaceFiles?.importImageBytes !== 'function') return null;
   if (document.querySelector('dialog[open]') || composing || secondary?.composing) return null;
   const target = event.target;
   if (!target?.closest?.('.cm-content, .vditor-reset')) return null;
