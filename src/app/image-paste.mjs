@@ -41,10 +41,11 @@ export function bindImagePaste({
 }) {
   const handler = event => {
     if (event.defaultPrevented || event.isComposing || !event.clipboardData) return;
-    const context = getContext(event);
-    if (!context) return;
     const image = clipboardImage(event.clipboardData);
     if (!image) return;
+    let context;
+    try { context = getContext(event); } catch (error) { onError(error); return; }
+    if (!context) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     Promise.resolve()
