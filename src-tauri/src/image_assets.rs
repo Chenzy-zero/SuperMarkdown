@@ -363,6 +363,23 @@ mod tests {
         result.unwrap();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn dropped_image_symlinks_are_rejected_before_import() {
+        let (state, root, key) = fixture();
+        let result = (|| -> Result<(), String> {
+            let source = root.join("source.png");
+            fs::write(&source, sample_png()).map_err(|error| error.to_string())?;
+            let link = root.join("linked.png");
+            std::os::unix::fs::symlink(&source, &link).map_err(|error| error.to_string())?;
+            assert!(inspect_dropped_path(&link).is_err());
+            assert!(import_dropped_path(&state, &key, &link).is_err());
+            Ok(())
+        })();
+        let _ = fs::remove_dir_all(root);
+        result.unwrap();
+    }
+
     #[test]
     fn dropped_file_classifier_keeps_text_files_and_rejects_bad_or_oversize_images() {
         let (state, root, key) = fixture();
