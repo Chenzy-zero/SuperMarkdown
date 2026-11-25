@@ -1287,7 +1287,10 @@ for (const side of ['left', 'right']) {
 bindToolbarTooltip();
 bindPaneDivider();
 bindFileDrop({
-  getActiveSide: () => layout === 'files' ? activePane : 'left', onError: showError,
+  getActiveSide: () => layout === 'files' ? activePane : 'left',
+  nativeDrop: Boolean(window.__TAURI__),
+  onDropTarget: target => { lastDropTarget = { side: target.side, x: target.x, y: target.y }; },
+  onError: showError,
   openFiles: async (files, side) => {
     const results = unwrap(await window.workspaceFiles.openDroppedFiles(files));
     droppedRequests.push(...results.map(result => ({ ...result, side })));
