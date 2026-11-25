@@ -22,6 +22,25 @@ export function toImageDataUrl(image) {
   return 'data:' + image.mime + ';base64,' + btoa(chunks.join(''));
 }
 
+
+// Pure insertion helper shared by the picker, future clipboard paste and drag.
+// This alters text only; the caller records one DocumentHistory entry.
+export function insertImageReference(text, caret, relativePath, lineEnding = '\n') {
+  if (!isManagedAssetPath(relativePath) || !['\n', '\r\n'].includes(lineEnding)) {
+    throw new Error('图片资源路径或换行方式无效。');
+  }
+  const original = String(text).replace(/\r\n?/g, '\n');
+  const at = Math.max(0, Math.min(original.length, caret));
+  const prefix = at > 0 && original[at - 1] !== '\n' ? '\n' : '';
+  const suffix = at < original.length && original[at] !== '\n' ? '\n' : '';
+  const insertion = prefix + '![图片](' + relativePath + ')' + suffix;
+  const next = original.slice(0, at) + insertion + original.slice(at);
+  return {
+    text: next.replace(/\n/g, lineEnding),
+    caret: next.slice(0, at + insertion.length).replace(/\n/g, lineEnding).length,
+  };
+}
+
 // This never changes Markdown or the editor history. It only gives WebView2 a
 // safe in-memory URL for an image that was explicitly stored under this file.
 export async function hydrateManagedImages(root, documentKey, load, onError = () => {}) {
