@@ -31,12 +31,13 @@ export function bindFileDrop({
     event.preventDefault();
     event.stopImmediatePropagation();
     clear();
+    const side = sideFor(event);
     if (dialogOpen()) {
+      onDropTarget({ side, x: event.clientX, y: event.clientY, nativeDrop, blocked: true });
       onError(new Error('请先完成当前对话框操作，再拖入文件。'));
       return;
     }
-    const side = sideFor(event);
-    onDropTarget({ side, x: event.clientX, y: event.clientY, nativeDrop });
+    onDropTarget({ side, x: event.clientX, y: event.clientY, nativeDrop, blocked: false });
     // Tauri receives authoritative absolute paths from WindowEvent::DragDrop.
     // Do not process DataTransfer.files here or the native event would duplicate
     // every text open / image import. Electron has no native Tauri event.
