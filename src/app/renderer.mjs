@@ -8,6 +8,7 @@ import { bindWorkbench } from './workbench.mjs';
 import { DocumentHistory } from './history.mjs';
 import { sample, compatibility, suggestedScale } from './samples.mjs';
 import { preserveProtectedBlocks, protectedBlocks } from './protected-blocks.mjs';
+import { preserveUnchangedTables } from './markdown-tables.mjs';
 import { visualCaretToSource, sourceCaretToVisual, renderedSelectionPrefix } from './markdown-caret.mjs';
 import { runUXChecks } from './ux-checks.mjs';
 import { runWorkspaceChecks } from './workspace-checks.mjs';
@@ -1020,7 +1021,7 @@ function capture() {
     doc().visualScrollTop = richRoot().scrollTop;
     if (richDirty) {
       try {
-        const markdown = preserveProtectedBlocks(doc().history.current.markdown, engine.getValue()).replace(/\r?\n/g, doc().lineEnding);
+        const markdown = preserveUnchangedTables(doc().history.current.markdown, preserveProtectedBlocks(doc().history.current.markdown, engine.getValue())).replace(/\r?\n/g, doc().lineEnding);
         doc().history.record(markdown, richCaretToMarkdown(richRoot(), doc(), markdown), 'visual');
       } catch (error) {
         richDirty = false;
