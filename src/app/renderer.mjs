@@ -594,13 +594,17 @@ function dropPoint(position, physical = true) {
 }
 
 function sideAtDrop(position, fallback = 'left') {
-  const point = dropPoint(position, true) || (lastDropTarget
-    ? dropPoint(lastDropTarget, false) : null);
-  if (!point) return fallback;
-  const element = document.elementFromPoint(point.x, point.y);
-  const pane = element?.closest?.('#left-pane, #right-pane');
-  if (pane?.id === 'right-pane' && !pane.hidden) return 'right';
-  if (pane?.id === 'left-pane' && !pane.hidden) return 'left';
+  const candidates = [
+    dropPoint(position, true),
+    lastDropTarget ? dropPoint(lastDropTarget, false) : null,
+  ];
+  for (const point of candidates) {
+    if (!point) continue;
+    const element = document.elementFromPoint(point.x, point.y);
+    const pane = element?.closest?.('#left-pane, #right-pane');
+    if (pane?.id === 'right-pane' && !pane.hidden) return 'right';
+    if (pane?.id === 'left-pane' && !pane.hidden) return 'left';
+  }
   return fallback;
 }
 
@@ -624,13 +628,16 @@ function placeRichCaret(root, point) {
 
 function imageDropContext(position) {
   if (document.querySelector('dialog[open]') || composing || secondary?.composing) return null;
-  const point = dropPoint(position, true) || (lastDropTarget
-    ? dropPoint(lastDropTarget, false) : null);
-  if (!point) return null;
-  const element = document.elementFromPoint(point.x, point.y);
-  const editor = element?.closest?.('.cm-content, .vditor-reset');
+  let point = dropPoint(position, true);
+  let element = point ? document.elementFromPoint(point.x, point.y) : null;
+  let editor = element?.closest?.('.cm-content, .vditor-reset');
+  if (!editor && lastDropTarget) {
+    point = dropPoint(lastDropTarget, false);
+    element = point ? document.elementFromPoint(point.x, point.y) : null;
+    editor = element?.closest?.('.cm-content, .vditor-reset');
+  }
   const pane = editor?.closest?.('#left-pane, #right-pane');
-  if (!editor || !pane || pane.hidden) return null;
+  if (!point || !editor || !pane || pane.hidden) return null;
   const side = pane.id === 'right-pane' ? 'right' : 'left';
   if (side === 'right' && (layout === 'single' || !secondary?.initialized)) return null;
   focusPane(side);
