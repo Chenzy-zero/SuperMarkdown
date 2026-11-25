@@ -747,12 +747,18 @@ fn take_open_files(state: State<'_, WorkspaceState>) -> Vec<Value> {
     let mut results = Vec::new();
     for pending in state.take_paths() {
         let path = pending.path;
+        let is_native_drop = pending.drop_position.is_some();
         let drop_position = pending.drop_position
             .map(|(x, y)| json!({ "x": x, "y": y }))
             .unwrap_or(Value::Null);
         let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let image_info = if is_native_drop {
+            image_assets::inspect_dropped_path(&path)
+        } else {
+            Ok(None)
+        };
 
-        match image_assets::inspect_dropped_path(&path) {
+        match image_info {
             Ok(Some((size, canonical))) => {
                 let token = Uuid::new_v4().to_string();
                 let stored = state.pending_dropped_images.lock().map(|mut images| {
