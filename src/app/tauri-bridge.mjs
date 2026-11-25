@@ -27,6 +27,11 @@ if (!window.workspaceFiles && typeof invoke === "function") {
     },
     openDefaultApps: () => call("open_default_apps"),
     openFile: () => call("open_file"),
+    // Image files are always imported relative to an already opened Markdown file.
+    // Never pass a caller-selected destination path to the Rust backend.
+    chooseImageAndImport: documentKey => call("choose_image_and_import", { documentKey }),
+    importImageBytes: request => call("import_image_bytes", { request }),
+    readImageAsset: request => call("read_image_asset", { request }),
     // Native OS drag-and-drop is queued by the Rust window event handler.
     openDroppedFiles: async () => [],
     save: request => call("save", { request }),
