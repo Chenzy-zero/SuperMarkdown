@@ -593,18 +593,21 @@ function dropPoint(position, physical = true) {
   return { x: position.x / scale, y: position.y / scale };
 }
 
+function pointForDrop(position) {
+  const nativePoint = dropPoint(position, true);
+  const domPoint = lastDropTarget ? dropPoint(lastDropTarget, false) : null;
+  if (!nativePoint) return domPoint;
+  if (domPoint && Math.hypot(nativePoint.x - domPoint.x, nativePoint.y - domPoint.y) <= 48) return domPoint;
+  return nativePoint;
+}
+
 function sideAtDrop(position, fallback = 'left') {
-  const candidates = [
-    lastDropTarget ? dropPoint(lastDropTarget, false) : null,
-    dropPoint(position, true),
-  ];
-  for (const point of candidates) {
-    if (!point) continue;
-    const element = document.elementFromPoint(point.x, point.y);
-    const pane = element?.closest?.('#left-pane, #right-pane');
-    if (pane?.id === 'right-pane' && !pane.hidden) return 'right';
-    if (pane?.id === 'left-pane' && !pane.hidden) return 'left';
-  }
+  const point = pointForDrop(position);
+  if (!point) return fallback;
+  const element = document.elementFromPoint(point.x, point.y);
+  const pane = element?.closest?.('#left-pane, #right-pane');
+  if (pane?.id === 'right-pane' && !pane.hidden) return 'right';
+  if (pane?.id === 'left-pane' && !pane.hidden) return 'left';
   return fallback;
 }
 
@@ -628,14 +631,9 @@ function placeRichCaret(root, point) {
 
 function imageDropContext(position) {
   if (document.querySelector('dialog[open]') || composing || secondary?.composing) return null;
-  let point = lastDropTarget ? dropPoint(lastDropTarget, false) : dropPoint(position, true);
-  let element = point ? document.elementFromPoint(point.x, point.y) : null;
-  let editor = element?.closest?.('.cm-content, .vditor-reset');
-  if (!editor && lastDropTarget && position) {
-    point = dropPoint(position, true);
-    element = point ? document.elementFromPoint(point.x, point.y) : null;
-    editor = element?.closest?.('.cm-content, .vditor-reset');
-  }
+  const point = pointForDrop(position);
+  const element = point ? document.elementFromPoint(point.x, point.y) : null;
+  const editor = element?.closest?.('.cm-content, .vditor-reset');
   const pane = editor?.closest?.('#left-pane, #right-pane');
   if (!point || !editor || !pane || pane.hidden) return null;
   const side = pane.id === 'right-pane' ? 'right' : 'left';
