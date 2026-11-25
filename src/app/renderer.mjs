@@ -83,10 +83,14 @@ function hydrateVisibleImages() {
     imageHydrationPending = false;
     const load = request => window.workspaceFiles.readImageAsset(request);
     if (mode === 'visual' && doc()?.file?.key) {
-      hydrateManagedImages(richRoot(), doc().file.key, load, showError).catch(showError);
+      const key = doc().file.key;
+      hydrateManagedImages(richRoot(), key, load, showError,
+        () => mode === 'visual' && doc()?.file?.key === key).catch(showError);
     }
     if (secondary?.initialized && secondary?.mode === 'visual' && secondary.document?.file?.key) {
-      hydrateManagedImages(secondary.root, secondary.document.file.key, load, showError).catch(showError);
+      const key = secondary.document.file.key;
+      hydrateManagedImages(secondary.root, key, load, showError,
+        () => secondary?.mode === 'visual' && secondary?.document?.file?.key === key).catch(showError);
     }
   });
 }
