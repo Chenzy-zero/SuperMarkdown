@@ -1119,6 +1119,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn native_drop_queue_preserves_target_coordinates_and_deduplicates_same_path() {
+        let state = WorkspaceState::default();
+        let first = PathBuf::from("first.png");
+        let second = PathBuf::from("notes.md");
+        state.queue_paths_at(vec![first.clone(), second.clone()], Some((120.0, 240.0)));
+        state.queue_paths_at(vec![first.clone()], Some((120.0, 240.0)));
+        state.queue_paths(vec![first.clone()]);
+        let pending = state.take_paths();
+        assert_eq!(pending.len(), 3);
+        assert_eq!(pending[0].path, first);
+        assert_eq!(pending[0].drop_position, Some((120.0, 240.0)));
+        assert_eq!(pending[1].path, second);
+        assert_eq!(pending[1].drop_position, Some((120.0, 240.0)));
+        assert_eq!(pending[2].drop_position, None);
+    }
+
+    #[test]
     fn utf8_and_utf16_round_trip_with_bom() {
         let text = "中文 Markdown 😀\r\n";
         for (encoding, bom) in [("utf-8", true), ("utf-16le", true), ("utf-16be", true)] {
