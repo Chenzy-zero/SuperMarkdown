@@ -39,3 +39,11 @@ test('映射无法可靠匹配时保留已有合法光标位置，而非跳入�
   assert.equal(visualCaretToSource('hello', ''), 0);
   assert.equal(sourceCaretToVisual('hello', '', 3), 0);
 });
+
+test('长篇重复段落映射不产生超大匹配数组，仍定位末尾', async () => {
+  const { visualCaretToSource, sourceCaretToVisual } = await import('../src/app/markdown-caret.mjs');
+  const markdown = Array(5000).fill('重复').join('\n\n');
+  const rendered = '重复'.repeat(5000);
+  assert.equal(visualCaretToSource(markdown, rendered), markdown.length);
+  assert.equal(sourceCaretToVisual(markdown, rendered, markdown.length), rendered.length);
+});
