@@ -4,6 +4,9 @@ export function insertImageReferences(text, caret, relativePaths, lineEnding = '
   if (!Array.isArray(relativePaths) || relativePaths.length < 1 || relativePaths.length > 128) {
     throw new Error('图片数量无效，一次最多插入 128 张。');
   }
+  if (!['\\n', '\\r\\n'].includes(lineEnding)) {
+    throw new Error('图片资源路径或换行方式无效。');
+  }
   let next = String(text).replace(/\r\n?/g, '\n');
   let at = Math.max(0, Math.min(next.length, caret));
   for (const path of relativePaths) {
