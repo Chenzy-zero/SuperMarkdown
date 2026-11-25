@@ -332,7 +332,15 @@ async function drainOpenFiles() {
   try {
     do {
       incomingScheduled = false;
-      const results = [...droppedRequests.splice(0), ...unwrap(await window.workspaceFiles.takeOpenFiles())];
+      let results = [...droppedRequests.splice(0), ...unwrap(await window.workspaceFiles.takeOpenFiles())];
+      if (lastDropTarget?.blocked) {
+        const blocked = results.filter(result => result.dropPosition);
+        const tokens = blocked.map(result => result.image?.token).filter(Boolean);
+        results = results.filter(result => !result.dropPosition);
+        if (tokens.length && typeof window.workspaceFiles?.discardDroppedImages === 'function') {
+          unwrap(await window.workspaceFiles.discardDroppedImages(tokens));
+        }
+      }
       const imageGroups = new Map();
       for (const result of results) {
         if (!result.image) continue;
@@ -1312,7 +1320,7 @@ bindPaneDivider();
 bindFileDrop({
   getActiveSide: () => layout === 'files' ? activePane : 'left',
   nativeDrop: Boolean(window.__TAURI__),
-  onDropTarget: target => { lastDropTarget = { side: target.side, x: target.x, y: target.y }; },
+  onDropTarget: target => { lastDropTarget = { side: target.side, x: target.x, y: target.y, blocked: target.blocked }; },
   onError: showError,
   openFiles: async (files, side) => {
     const results = unwrap(await window.workspaceFiles.openDroppedFiles(files));
