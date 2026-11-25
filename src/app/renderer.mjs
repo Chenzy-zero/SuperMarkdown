@@ -16,7 +16,7 @@ import { runLayoutChecks } from './layout-checks.mjs';
 import { bindPaneDivider } from './pane-divider.mjs';
 import { runStorageChecks } from './storage-checks.mjs';
 import { bindFileDrop } from './file-drop.mjs';
-import { hydrateManagedImages } from './image-assets.mjs';
+import { hydrateManagedImages, insertImageReference } from './image-assets.mjs';
 import { ActiveFolderFollower } from './active-folder.mjs';
 window.runPrototypeUXChecks = runUXChecks;
 window.runPrototypeWorkspaceChecks = runWorkspaceChecks;
@@ -443,15 +443,10 @@ async function insertLocalImage() {
     if (current !== item.history.current.markdown.replace(/\r\n?/g, '\n')) {
       throw new Error('文档内容在图片选择期间发生变化，请先完成当前编辑。');
     }
-    const at = Math.min(host.selectionStart, current.length);
-    const prefix = at > 0 && current[at - 1] !== '\n' ? '\n' : '';
-    const suffix = at < current.length && current[at] !== '\n' ? '\n' : '';
-    const imageMarkdown = prefix + '![图片](' + inserted.relativePath + ')' + suffix;
-    const next = current.slice(0, at) + imageMarkdown + current.slice(at);
-    const lineEnding = item.lineEnding || '\n';
-    const caret = next.slice(0, at + imageMarkdown.length).replace(/\n/g, lineEnding).length;
+    const { text, caret } = insertImageReference(
+      current, host.selectionStart, inserted.relativePath, item.lineEnding || '\n');
     item.history.closeGroup();
-    item.history.record(next.replace(/\n/g, lineEnding), caret, null);
+    item.history.record(text, caret, null);
     item.history.closeGroup();
     if (right) {
       secondary.state.caret = caret;
