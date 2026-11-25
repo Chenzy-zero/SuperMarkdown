@@ -500,7 +500,7 @@ function imagePasteContext(event) {
   const currentMode = side === 'right' ? secondary.mode : mode;
   const host = side === 'right' ? secondary.source : source;
   const rawCaret = currentMode === 'visual'
-    ? side === 'right' ? secondary.state.caret : item.history.current.caret
+    ? richCaretToMarkdown(side === 'right' ? secondary.root : richRoot(), item)
     : host.selectionStart;
   const sourceCaret = currentMode === 'visual'
     ? item.history.current.markdown.slice(0, rawCaret).replace(/\r\n/g, '\n').length
@@ -523,6 +523,7 @@ async function pasteClipboardImage(image, context) {
     if (item.history.current.markdown !== context.text) {
       throw new Error('剪贴板读取期间文档已更新，请重新粘贴以免覆盖最新内容。');
     }
+    if (item.saving) throw new Error('文档正在保存，请完成后重新粘贴截图。');
     if (typeof window.workspaceFiles?.importImageBytes !== 'function') {
       throw new Error('当前文件宿主无法保存截图，请使用 Tauri 版本的“插入图片…”。');
     }
@@ -780,12 +781,11 @@ function restoreTextCaret(root, offset) {
 }
 
 // 仅验证普通段落定位；复杂语法、选区及不可渲染块的映射仍需进一步验证。
-function richCaretToMarkdown() {
-  const root = richRoot();
+function richCaretToMarkdown(root = richRoot(), item = doc()) {
   const offset = textCaret(root);
   const text = root.textContent.slice(0, offset);
   const tail = text.slice(-24);
-  const markdown = doc().history.current.markdown;
+  const markdown = item.history.current.markdown;
   const position = tail ? markdown.indexOf(tail) : 0;
   return position < 0 ? Math.min(offset, markdown.length) : position + tail.length;
 }
