@@ -47,8 +47,8 @@ pub(crate) struct ReadImageRequest {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ImageImportResult {
-    relative_path: String,
-    mime: &'static str,
+    pub(crate) relative_path: String,
+    pub(crate) mime: &'static str,
 }
 
 #[derive(Debug, Serialize)]
