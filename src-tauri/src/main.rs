@@ -37,6 +37,7 @@ struct WorkspaceState {
 struct PendingPath {
     path: PathBuf,
     drop_position: Option<(f64, f64)>,
+    drop_id: Option<String>,
 }
 
 #[derive(Clone)]
@@ -50,14 +51,14 @@ struct OpenedFile {
 
 impl WorkspaceState {
     fn queue_paths(&self, paths: Vec<PathBuf>) {
-        self.queue_paths_at(paths, None);
+        self.queue_paths_at(paths, None, None);
     }
 
-    fn queue_paths_at(&self, paths: Vec<PathBuf>, drop_position: Option<(f64, f64)>) {
+    fn queue_paths_at(&self, paths: Vec<PathBuf>, drop_position: Option<(f64, f64)>, drop_id: Option<String>) {
         if let Ok(mut pending) = self.pending_files.lock() {
             for path in paths {
-                if !pending.iter().any(|item| item.path == path && item.drop_position == drop_position) {
-                    pending.push(PendingPath { path, drop_position });
+                if !pending.iter().any(|item| item.path == path && item.drop_id == drop_id) {
+                    pending.push(PendingPath { path, drop_position, drop_id: drop_id.clone() });
                 }
             }
         }
@@ -747,6 +748,7 @@ fn take_open_files(state: State<'_, WorkspaceState>) -> Vec<Value> {
     let mut results = Vec::new();
     for pending in state.take_paths() {
         let path = pending.path;
+        let drop_id = pending.drop_id;
         let is_native_drop = pending.drop_position.is_some();
         let drop_position = pending.drop_position
             .map(|(x, y)| json!({ "x": x, "y": y }))
@@ -769,19 +771,22 @@ fn take_open_files(state: State<'_, WorkspaceState>) -> Vec<Value> {
                 if stored {
                     results.push(json!({
                         "image": { "token": token, "name": name, "size": size },
-                        "dropPosition": drop_position
+                        "dropPosition": drop_position,
+                        "dropId": drop_id
                     }));
                 } else {
                     results.push(json!({
                         "error": "待处理图片过多，请分批拖入。",
-                        "dropPosition": drop_position
+                        "dropPosition": drop_position,
+                        "dropId": drop_id
                     }));
                 }
             }
             Err(error) => {
                 results.push(json!({
                     "error": format!("无法导入图片 {name}：{error}"),
-                    "dropPosition": drop_position
+                    "dropPosition": drop_position,
+                    "dropId": drop_id
                 }));
             }
             Ok(None) => {
@@ -795,12 +800,14 @@ fn take_open_files(state: State<'_, WorkspaceState>) -> Vec<Value> {
                     Ok(mut value) => {
                         if let Some(object) = value.as_object_mut() {
                             object.insert("dropPosition".to_string(), drop_position);
+                            object.insert("dropId".to_string(), json!(drop_id));
                         }
                         results.push(value);
                     }
                     Err(error) => results.push(json!({
                         "error": format!("无法打开 {name}：{error}"),
-                        "dropPosition": drop_position
+                        "dropPosition": drop_position,
+                        "dropId": drop_id
                     })),
                 }
             }
@@ -1111,8 +1118,13 @@ fn main() {
                 }
             }
             WindowEvent::DragDrop(DragDropEvent::Drop { paths, position }) => {
-                window.state::<WorkspaceState>().queue_paths_at(paths.clone(), Some((position.x, position.y)));
-                let _ = window.emit("application:files-pending", ());
+                let drop_id = Uuid::new_v4().to_string();
+                window.state::<WorkspaceState>().queue_paths_at(
+                    paths.clone(), Some((position.x, position.y)), Some(drop_id.clone()),
+                );
+                let _ = window.emit("application:files-pending", json!({
+                    "dropId": drop_id, "dropPosition": { "x": position.x, "y": position.y }
+                }));
             }
             _ => {}
         })
@@ -1129,16 +1141,19 @@ mod tests {
         let state = WorkspaceState::default();
         let first = PathBuf::from("first.png");
         let second = PathBuf::from("notes.md");
-        state.queue_paths_at(vec![first.clone(), second.clone()], Some((120.0, 240.0)));
-        state.queue_paths_at(vec![first.clone()], Some((120.0, 240.0)));
+        state.queue_paths_at(vec![first.clone(), second.clone()], Some((120.0, 240.0)), Some("batch-1".to_string()));
+        state.queue_paths_at(vec![first.clone()], Some((120.0, 240.0)), Some("batch-1".to_string()));
+        state.queue_paths_at(vec![first.clone()], Some((120.0, 240.0)), Some("batch-2".to_string()));
         state.queue_paths(vec![first.clone()]);
         let pending = state.take_paths();
-        assert_eq!(pending.len(), 3);
+        assert_eq!(pending.len(), 4);
         assert_eq!(pending[0].path, first);
         assert_eq!(pending[0].drop_position, Some((120.0, 240.0)));
         assert_eq!(pending[1].path, second);
         assert_eq!(pending[1].drop_position, Some((120.0, 240.0)));
-        assert_eq!(pending[2].drop_position, None);
+        assert_eq!(pending[0].drop_id.as_deref(), Some("batch-1"));
+        assert_eq!(pending[2].drop_id.as_deref(), Some("batch-2"));
+        assert_eq!(pending[3].drop_position, None);
     }
 
     #[test]

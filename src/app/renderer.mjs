@@ -9,7 +9,7 @@ import { DocumentHistory } from './history.mjs';
 import { sample, compatibility, suggestedScale } from './samples.mjs';
 import { preserveProtectedBlocks, protectedBlocks } from './protected-blocks.mjs';
 import { preserveUnchangedTables } from './markdown-tables.mjs';
-import { visualCaretToSource, sourceCaretToVisual, renderedSelectionPrefix } from './markdown-caret.mjs';
+import { visualCaretToSource, sourceCaretToVisual, renderedSelectionPrefix, visualDropCaretToSource } from './markdown-caret.mjs';
 import { runUXChecks } from './ux-checks.mjs';
 import { runWorkspaceChecks } from './workspace-checks.mjs';
 import { SecondaryPane } from './secondary-pane.mjs';
@@ -70,6 +70,8 @@ let layout = 'single';
 let newFileDirectory = '';
 let newFileRoot = null;
 const droppedRequests = [];
+// Bind each OS drop to its target before any asynchronous queue read/import.
+const nativeDropTargets = new Map();
 let lastDropTarget = null;
 let newFileSide = 'left';
 const source = $('source');
@@ -303,11 +305,27 @@ function acceptExternal(result, side = 'left') {
   if (result.error || result.folderError) showError(new Error(result.error || result.folderError));
 }
 
+function receiveOpenFiles(event) {
+  const payload = event?.payload;
+  if (payload?.dropId) {
+    // Bound memory if the native queue is unavailable. Evicted batches fail
+    // closed rather than selecting whatever document happens to be active.
+    if (nativeDropTargets.size >= 128) nativeDropTargets.delete(nativeDropTargets.keys().next().value);
+    nativeDropTargets.set(payload.dropId, {
+      blocked: Boolean(document.querySelector('dialog[open]')),
+      context: imageDropContext(payload.dropPosition),
+      side: sideAtDrop(payload.dropPosition, 'left'),
+    });
+  }
+  return drainOpenFiles();
+}
+
 async function drainOpenFiles() {
   incomingScheduled = true;
   if (!incomingReady || incomingBusy) return;
   if (document.querySelector('dialog[open]')) {
     incomingBusy = true;
+    incomingScheduled = false;
     try {
       const results = [...droppedRequests.splice(0), ...unwrap(await window.workspaceFiles.takeOpenFiles())];
       const deferred = [], tokens = [];
@@ -315,6 +333,7 @@ async function drainOpenFiles() {
       for (const result of results) {
         if (result.dropPosition) {
           ignoredDrop = true;
+          nativeDropTargets.delete(result.dropId);
           if (result.image?.token) tokens.push(result.image.token);
         } else deferred.push(result);
       }
@@ -327,7 +346,12 @@ async function drainOpenFiles() {
       }
       lastDropTarget = null;
     } catch (error) { showError(error); }
-    finally { incomingBusy = false; }
+    finally {
+      incomingBusy = false;
+      if (!document.querySelector('dialog[open]') && (incomingScheduled || droppedRequests.length)) {
+        queueMicrotask(drainOpenFiles);
+      }
+    }
     return;
   }
   incomingBusy = true;
@@ -335,10 +359,12 @@ async function drainOpenFiles() {
     do {
       incomingScheduled = false;
       let results = [...droppedRequests.splice(0), ...unwrap(await window.workspaceFiles.takeOpenFiles())];
-      if (lastDropTarget?.blocked) {
-        const blocked = results.filter(result => result.dropPosition);
+      {
+        const isBlocked = result => nativeDropTargets.get(result.dropId)?.blocked;
+        const blocked = results.filter(isBlocked);
         const tokens = blocked.map(result => result.image?.token).filter(Boolean);
-        results = results.filter(result => !result.dropPosition);
+        results = results.filter(result => !isBlocked(result));
+        for (const result of blocked) nativeDropTargets.delete(result.dropId);
         if (tokens.length && typeof window.workspaceFiles?.discardDroppedImages === 'function') {
           unwrap(await window.workspaceFiles.discardDroppedImages(tokens));
         }
@@ -347,21 +373,23 @@ async function drainOpenFiles() {
       for (const result of results) {
         if (!result.image) continue;
         const position = result.dropPosition || null;
-        const key = position ? position.x + ',' + position.y : 'dom-drop';
-        if (!imageGroups.has(key)) imageGroups.set(key, { position, entries: [] });
+        const key = result.dropId || 'dom-drop';
+        if (!imageGroups.has(key)) imageGroups.set(key, {
+          position, context: nativeDropTargets.get(result.dropId)?.context || null, entries: [],
+        });
         imageGroups.get(key).entries.push(result);
       }
       // Insert all images before opening any mixed text-file drops, so opening
       // a text file cannot steal the original Markdown insertion target.
       for (const group of imageGroups.values()) {
-        await importDroppedImages(group.entries, group.position);
+        await importDroppedImages(group.entries, group.context);
       }
       for (const result of results) {
         if (result.image) continue;
-        const side = result.side || (result.dropPosition
-          ? sideAtDrop(result.dropPosition, 'left') : 'left');
+        const side = result.side || nativeDropTargets.get(result.dropId)?.side || 'left';
         acceptExternal(result, side);
       }
+      for (const result of results) nativeDropTargets.delete(result.dropId);
       lastDropTarget = null;
       if (results.length) incomingScheduled = true;
     } while (incomingScheduled && !document.querySelector('dialog[open]'));
@@ -687,7 +715,9 @@ function imageDropContext(position) {
       secondary.state.caret = markdownCaret;
       item.history.current.caret = markdownCaret;
     } else capture();
-    const markdownCaret = richCaretToMarkdown(root, item);
+    const markdownCaret = visualDropCaretToSource(item.history.current.markdown,
+      root, getSelection());
+    if (markdownCaret === null) return null;
     sourceCaret = item.history.current.markdown.slice(0, markdownCaret).replace(/\r\n/g, '\n').length;
   } else {
     const view = host?.codeEditor?.view;
@@ -705,17 +735,16 @@ function imageDropContext(position) {
 }
 
 const imageDropBusy = new WeakSet();
-async function importDroppedImages(entries, position) {
+async function importDroppedImages(entries, context) {
   const tokens = entries.map(entry => entry.image.token).filter(Boolean);
   const discard = async () => {
     if (tokens.length && typeof window.workspaceFiles?.discardDroppedImages === 'function') {
       try { unwrap(await window.workspaceFiles.discardDroppedImages(tokens)); } catch {}
     }
   };
-  const context = imageDropContext(position);
   if (!context) {
     await discard();
-    showError(new Error('请将图片拖入 Markdown 编辑区域，并确保目标文档已打开。'));
+    showError(new Error('无法确认图片插入位置，请切到 Markdown 源码模式后重新拖入。'));
     return;
   }
   const { item, side } = context;
@@ -726,6 +755,14 @@ async function importDroppedImages(entries, position) {
   }
   imageDropBusy.add(item);
   try {
+    if (document.querySelector('dialog[open]') || composing || secondary?.composing || item.saving) {
+      throw new Error('目标文档正在处理其他操作，请完成后重新拖入图片。');
+    }
+    capture(); secondary?.capture();
+    if (focusedDoc() !== item || activePane !== side || layout !== context.layout
+      || item.history.current.markdown !== context.text || item.file?.key !== (context.fileKey || undefined)) {
+      throw new Error('排队期间目标文档或内容发生变化，请重新拖入图片。');
+    }
     if (!item.file && !await saveDocument(item, true)) return;
     if (!item.file || item.kind !== 'markdown' || !item.file.key
       || (context.fileKey && item.file.key !== context.fileKey)
@@ -749,7 +786,8 @@ async function importDroppedImages(entries, position) {
       else if (result.error) failures.push(image.name + '：' + result.error);
       else inserted.push({ relativePath: result.relativePath });
     }
-    if (focusedDoc() !== item || activePane !== side || layout !== context.layout
+    if (document.querySelector('dialog[open]') || composing || secondary?.composing || item.saving
+      || focusedDoc() !== item || activePane !== side || layout !== context.layout
       || item.kind !== 'markdown' || item.file?.key !== importDocumentKey
       || item.history.current.markdown !== context.text) {
       if (inserted.length) {
@@ -1257,7 +1295,7 @@ $('recovery-restore').onclick = () => { $('recovery-dialog').close(); restoreDra
 $('recovery-discard').onclick = () => { $('recovery-dialog').close(); recoveryReady = true; flushRecovery().catch(showError); };
 $('recovery-dialog').addEventListener('cancel', event => event.preventDefault());
 $('examples-section').hidden = !startup.verify;
-window.workspaceFiles.onFilesPending(drainOpenFiles);
+window.workspaceFiles.onFilesPending(receiveOpenFiles);
 for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('close', drainOpenFiles);
 $('default-markdown').onclick = async () => {
   try {

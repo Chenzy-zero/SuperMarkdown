@@ -47,3 +47,43 @@ test('长篇重复段落映射不产生超大匹配数组，仍定位末尾', as
   assert.equal(visualCaretToSource(markdown, rendered), markdown.length);
   assert.equal(sourceCaretToVisual(markdown, rendered, markdown.length), rendered.length);
 });
+
+function plainDropDom(blocks, focusIndex, focusOffset) {
+  const nodes = blocks.map(([tagName, textContent, rich = false]) => {
+    const text = { nodeType: rich ? 1 : 3, textContent };
+    const node = { nodeType: 1, tagName, textContent, childNodes: [text],
+      contains: item => item === text,
+      ownerDocument: { createRange: () => ({
+        selectNodeContents() {}, setEnd(_node, offset) { this.offset = offset; },
+        toString() { return textContent.slice(0, this.offset); },
+      }) },
+    };
+    return node;
+  });
+  const root = { childNodes: nodes, contains: node => nodes.some(item => item === node || item.contains(node)) };
+  return { root, selection: { focusNode: nodes[focusIndex].childNodes[0], focusOffset } };
+}
+
+test('visual image drops map repeated plain blocks and CRLF by exact DOM/source spans', async () => {
+  const { visualDropCaretToSource } = await import('../src/app/markdown-caret.mjs');
+  const word = 'abcdefghijklmnopqrstuvwx';
+  const markdown = word + '\r\n\r\n' + word;
+  const { root, selection } = plainDropDom([['P', word], ['P', word]], 1, word.length);
+  assert.equal(visualDropCaretToSource(markdown, root, selection), markdown.length);
+  const heading = plainDropDom([['H1', 'hello'], ['P', 'world']], 1, 5);
+  assert.equal(visualDropCaretToSource('# hello\r\n\r\nworld', heading.root, heading.selection), '# hello\r\n\r\nworld'.length);
+});
+
+test('visual image drops refuse hidden URLs, rich text, and unmatched source blocks', async () => {
+  const { visualDropCaretToSource } = await import('../src/app/markdown-caret.mjs');
+  const word = 'abcdefghijklmnopqrstuvwx';
+  for (const markdown of [
+    `[${word}](${word})\n\n${word}`,
+    `[${word}](${word})\n\nabcdefghijkl**mnop**qrstuvwx`,
+  ]) {
+    const { root, selection } = plainDropDom([['P', word, true], ['P', word]], 1, word.length);
+    assert.equal(visualDropCaretToSource(markdown, root, selection), null);
+  }
+  const mismatch = plainDropDom([['P', 'hello'], ['P', 'world']], 1, 5);
+  assert.equal(visualDropCaretToSource('hello\nworld', mismatch.root, mismatch.selection), null);
+});
