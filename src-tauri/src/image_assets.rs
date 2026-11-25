@@ -152,11 +152,16 @@ fn publish_new_file(temporary: &Path, destination: &Path) -> std::io::Result<()>
 // Inspect an OS-dropped path without exposing it to the renderer. Only real
 // regular files with a supported image signature are classified as images.
 pub(crate) fn inspect_dropped_path(path: &Path) -> Result<Option<(u64, PathBuf)>, String> {
-    let info = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+    let image_extension = path.extension().and_then(|value| value.to_str())
+        .map(|value| matches!(value.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp"))
+        .unwrap_or(false);
+    let info = match fs::symlink_metadata(path) {
+        Ok(info) => info,
+        Err(error) if image_extension => return Err(error.to_string()),
+        Err(_) => return Ok(None),
+    };
     if info.file_type().is_symlink() {
-        if path.extension().and_then(|value| value.to_str())
-            .map(|value| matches!(value.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp"))
-            .unwrap_or(false) {
+        if image_extension {
             return Err("拒绝导入符号链接图片，请直接拖入原始图片文件。".to_string());
         }
         return Ok(None);
@@ -167,9 +172,6 @@ pub(crate) fn inspect_dropped_path(path: &Path) -> Result<Option<(u64, PathBuf)>
     let mut header = [0_u8; 12];
     let count = file.read(&mut header).map_err(|error| error.to_string())?;
     let supported_header = detect_image(&header[..count]).is_some();
-    let image_extension = path.extension().and_then(|value| value.to_str())
-        .map(|value| matches!(value.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp"))
-        .unwrap_or(false);
     if !supported_header && !image_extension { return Ok(None); }
     if info.len() > MAX_IMAGE_BYTES as u64 {
         return Err(format!("图片 {} 超过 8 MiB，已拒绝导入。", path.file_name().unwrap_or_default().to_string_lossy()));
