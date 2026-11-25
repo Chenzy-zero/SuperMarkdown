@@ -7,7 +7,8 @@ export function bindFileDrop({
 }) {
   const panes = [...root.querySelectorAll('.editor-pane')];
   const clear = () => panes.forEach(pane => pane.classList.remove('file-drop-target'));
-  const hasFiles = event => Array.from(event.dataTransfer?.types || []).includes('Files');
+  const hasFiles = event => Array.from(event.dataTransfer?.types || []).includes('Files')
+    || Boolean(event.dataTransfer?.files?.length);
   const sideFor = event => event.target?.closest?.('#right-pane') ? 'right'
     : event.target?.closest?.('#left-pane') ? 'left' : getActiveSide();
   const dialogOpen = () => Boolean(root.querySelector('dialog[open]'));
