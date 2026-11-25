@@ -102,10 +102,11 @@ test('纯文本/链接拖动不拦截；打开对话框时拒绝文件拖入', a
   assert.equal(link.stopped, false);
   assert.equal(errors.length, 0);
 
-  const modal = fixture({ dialog: true });
+  const modal = fixture({ dialog: true }), blockedTargets = [];
   bindFileDrop({
     root: modal.root, windowTarget: modal.windowTarget, nativeDrop: true,
     getActiveSide: () => 'left', openFiles: async files => opened.push(files),
+    onDropTarget: value => blockedTargets.push(value),
     onError: error => errors.push(error),
   });
   const blocked = modal.event('left');
@@ -113,5 +114,6 @@ test('纯文本/链接拖动不拦截；打开对话框时拒绝文件拖入', a
   assert.equal(blocked.prevented, true);
   assert.equal(errors.length, 1);
   assert.match(errors[0].message, /对话框/);
+  assert.equal(blockedTargets[0].blocked, true);
   assert.equal(opened.length, 0);
 });
