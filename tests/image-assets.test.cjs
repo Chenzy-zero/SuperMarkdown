@@ -60,3 +60,31 @@ test('从已授权文档读取图片，不改写原始 Markdown 且防止 DOM �
   });
   assert.equal(replaced.rendered, undefined, '已被 Vditor 替换的节点不应被异步修改');
 });
+
+
+test('插入图片引用保留 Unicode 光标偏移与 CRLF；只修改内存文本', async () => {
+  const { insertImageReference } = await import('../src/app/image-assets.mjs');
+  const path = 'notes.assets/550e8400-e29b-41d4-a716-446655440000.png';
+  const inserted = insertImageReference('a🙂b\r\n第二行', 3, path, '\r\n');
+  assert.equal(inserted.text, 'a🙂\r\n![图片](' + path + ')\r\nb\r\n第二行');
+  assert.equal(inserted.caret, ('a🙂\r\n![图片](' + path + ')\r\n').length);
+  const first = insertImageReference('', 0, path);
+  assert.equal(first.text, '![图片](' + path + ')');
+  assert.throws(() => insertImageReference('hello', 2, '../file.png'), /路径/);
+  assert.throws(() => insertImageReference('hello', 2, path, '\r'), /换行/);
+});
+
+test('图片插入可以作为一个独立 Undo/Redo 动作记录', async () => {
+  const { insertImageReference } = await import('../src/app/image-assets.mjs');
+  const { DocumentHistory } = await import('../src/app/history.mjs');
+  const history = new DocumentHistory('正文');
+  history.record('正文\n', 3, 'source');
+  history.closeGroup();
+  const before = history.current.markdown;
+  const insertion = insertImageReference(before, before.length,
+    'notes.assets/550e8400-e29b-41d4-a716-446655440000.png');
+  history.record(insertion.text, insertion.caret, null);
+  history.closeGroup();
+  assert.equal(history.undo().markdown, before);
+  assert.equal(history.redo().markdown, insertion.text);
+});
