@@ -303,7 +303,31 @@ function acceptExternal(result, side = 'left') {
 
 async function drainOpenFiles() {
   incomingScheduled = true;
-  if (!incomingReady || incomingBusy || document.querySelector('dialog[open]')) return;
+  if (!incomingReady || incomingBusy) return;
+  if (document.querySelector('dialog[open]')) {
+    incomingBusy = true;
+    try {
+      const results = [...droppedRequests.splice(0), ...unwrap(await window.workspaceFiles.takeOpenFiles())];
+      const deferred = [], tokens = [];
+      let ignoredDrop = false;
+      for (const result of results) {
+        if (result.dropPosition) {
+          ignoredDrop = true;
+          if (result.image?.token) tokens.push(result.image.token);
+        } else deferred.push(result);
+      }
+      droppedRequests.push(...deferred);
+      if (tokens.length && typeof window.workspaceFiles?.discardDroppedImages === 'function') {
+        unwrap(await window.workspaceFiles.discardDroppedImages(tokens));
+      }
+      if (ignoredDrop && !lastDropTarget) {
+        showError(new Error('请先关闭当前对话框，再拖入文件。'));
+      }
+      lastDropTarget = null;
+    } catch (error) { showError(error); }
+    finally { incomingBusy = false; }
+    return;
+  }
   incomingBusy = true;
   try {
     do {
