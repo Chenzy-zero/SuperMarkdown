@@ -595,8 +595,8 @@ function dropPoint(position, physical = true) {
 
 function sideAtDrop(position, fallback = 'left') {
   const candidates = [
-    dropPoint(position, true),
     lastDropTarget ? dropPoint(lastDropTarget, false) : null,
+    dropPoint(position, true),
   ];
   for (const point of candidates) {
     if (!point) continue;
@@ -628,11 +628,11 @@ function placeRichCaret(root, point) {
 
 function imageDropContext(position) {
   if (document.querySelector('dialog[open]') || composing || secondary?.composing) return null;
-  let point = dropPoint(position, true);
+  let point = lastDropTarget ? dropPoint(lastDropTarget, false) : dropPoint(position, true);
   let element = point ? document.elementFromPoint(point.x, point.y) : null;
   let editor = element?.closest?.('.cm-content, .vditor-reset');
-  if (!editor && lastDropTarget) {
-    point = dropPoint(lastDropTarget, false);
+  if (!editor && lastDropTarget && position) {
+    point = dropPoint(position, true);
     element = point ? document.elementFromPoint(point.x, point.y) : null;
     editor = element?.closest?.('.cm-content, .vditor-reset');
   }
