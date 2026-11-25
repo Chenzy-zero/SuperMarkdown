@@ -629,7 +629,7 @@ function pointForDrop(position) {
   const nativePoint = dropPoint(position, true);
   const domPoint = lastDropTarget ? dropPoint(lastDropTarget, false) : null;
   if (!nativePoint) return domPoint;
-  if (domPoint && Math.hypot(nativePoint.x - domPoint.x, nativePoint.y - domPoint.y) <= 48) return domPoint;
+  if (domPoint && Math.hypot(nativePoint.x - domPoint.x, nativePoint.y - domPoint.y) <= 8) return domPoint;
   return nativePoint;
 }
 
