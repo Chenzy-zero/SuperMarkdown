@@ -1,4 +1,5 @@
 import { preserveProtectedBlocks } from './protected-blocks.mjs';
+import { preserveUnchangedTables } from './markdown-tables.mjs';
 import { visualCaretToSource, renderedSelectionPrefix } from './markdown-caret.mjs';
 
 // 第二个编辑视图只持有光标和滚动位置，文档及撤销记录仍由应用持有。
@@ -70,7 +71,7 @@ export class SecondaryPane {
       this.state.visualScrollTop = this.root.scrollTop;
       if (this.richDirty) {
         try {
-          const markdown = preserveProtectedBlocks(item.history.current.markdown, this.editor.getValue()).replace(/\r?\n/g, item.lineEnding);
+          const markdown = preserveUnchangedTables(item.history.current.markdown, preserveProtectedBlocks(item.history.current.markdown, this.editor.getValue())).replace(/\r?\n/g, item.lineEnding);
           const prefix = renderedSelectionPrefix(this.root, getSelection());
           const caret = prefix === null ? this.state.caret
             : visualCaretToSource(markdown, prefix, this.state.caret);
