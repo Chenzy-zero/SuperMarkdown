@@ -72,3 +72,17 @@ export function sourceCaretToVisual(markdown, renderedText, sourceOffset) {
   }
   return Math.max(0, Math.min(visible.length, position));
 }
+
+// Read the actual focus endpoint (rather than selection.anchor or a substring
+// of textContent). It handles backward selections and preserves block breaks.
+export function renderedSelectionPrefix(root, selection) {
+  if (!root || !selection?.focusNode || !root.contains(selection.focusNode)) return null;
+  try {
+    const range = root.ownerDocument.createRange();
+    range.selectNodeContents(root);
+    range.setEnd(selection.focusNode, selection.focusOffset);
+    return range.toString();
+  } catch {
+    return null;
+  }
+}
