@@ -16,6 +16,7 @@ import { runLayoutChecks } from './layout-checks.mjs';
 import { bindPaneDivider } from './pane-divider.mjs';
 import { runStorageChecks } from './storage-checks.mjs';
 import { bindFileDrop } from './file-drop.mjs';
+import { hydrateManagedImages } from './image-assets.mjs';
 import { ActiveFolderFollower } from './active-folder.mjs';
 window.runPrototypeUXChecks = runUXChecks;
 window.runPrototypeWorkspaceChecks = runWorkspaceChecks;
@@ -74,6 +75,21 @@ let workbench, encodingMenu, comparison, findPanel;
 const doc = () => documents[activeIndex];
 const focusedDoc = () => activePane === 'right' ? secondary?.document : doc();
 const richRoot = () => document.querySelector('.vditor-wysiwyg > .vditor-reset');
+let imageHydrationPending = false;
+function hydrateVisibleImages() {
+  if (imageHydrationPending || typeof window.workspaceFiles?.readImageAsset !== 'function') return;
+  imageHydrationPending = true;
+  queueMicrotask(() => {
+    imageHydrationPending = false;
+    const load = request => window.workspaceFiles.readImageAsset(request);
+    if (mode === 'visual' && doc()?.file?.key) {
+      hydrateManagedImages(richRoot(), doc().file.key, load, showError).catch(showError);
+    }
+    if (secondary?.initialized && secondary?.mode === 'visual' && secondary.document?.file?.key) {
+      hydrateManagedImages(secondary.root, secondary.document.file.key, load, showError).catch(showError);
+    }
+  });
+}
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let resolveReady;
 window.prototypeReady = new Promise(resolve => { resolveReady = resolve; });
@@ -398,6 +414,56 @@ async function saveDocument(item = focusedDoc(), saveAs = false, format = null) 
   return result;
 }
 
+// Issue #5: user-selected image is written only to an already opened Markdown
+// file's managed asset folder. The visible insertion is a separate undo step.
+async function insertLocalImage() {
+  const item = focusedDoc();
+  if (!item || item.kind !== 'markdown' || item.saving || composing || secondary?.composing) return;
+  if (typeof window.workspaceFiles?.chooseImageAndImport !== 'function') {
+    showError(new Error('当前文件宿主不支持图片资产导入，请使用 Tauri 版本。'));
+    return;
+  }
+  // Unnamed files cannot have stable relative image paths.
+  if (!item.file && !await saveDocument(item, true)) return;
+  if (!item.file || focusedDoc() !== item) return;
+  try {
+    const inserted = unwrap(await window.workspaceFiles.chooseImageAndImport(item.file.key));
+    if (!inserted) return;
+    if (focusedDoc() !== item || !item.file) {
+      throw new Error('图片已保存到资产文件夹，但当前文档已切换。请返回原文档插入该图片链接。');
+    }
+    if (layout === 'sync' && activePane === 'left') focusPane('right');
+    else if (activePane === 'right' && secondary?.mode === 'visual') secondary.setMode('source');
+    else if (activePane === 'left' && mode === 'visual') setMode('source');
+    capture(); secondary?.capture();
+    const right = activePane === 'right';
+    const host = right ? secondary?.source : source;
+    if (!host || !focusedDoc() || focusedDoc() !== item) return;
+    const current = host.value;
+    if (current !== item.history.current.markdown.replace(/\r\n?/g, '\n')) {
+      throw new Error('文档内容在图片选择期间发生变化，请先完成当前编辑。');
+    }
+    const at = Math.min(host.selectionStart, current.length);
+    const prefix = at > 0 && current[at - 1] !== '\n' ? '\n' : '';
+    const suffix = at < current.length && current[at] !== '\n' ? '\n' : '';
+    const imageMarkdown = prefix + '![图片](' + inserted.relativePath + ')' + suffix;
+    const next = current.slice(0, at) + imageMarkdown + current.slice(at);
+    const lineEnding = item.lineEnding || '\n';
+    const caret = next.slice(0, at + imageMarkdown.length).replace(/\n/g, lineEnding).length;
+    item.history.closeGroup();
+    item.history.record(next.replace(/\n/g, lineEnding), caret, null);
+    item.history.closeGroup();
+    if (right) {
+      secondary.state.caret = caret;
+      secondary.refresh({ force: true });
+      if (item === doc()) render({ focus: false });
+      else updateUI();
+    } else render({ focus: false });
+    scheduleRecovery();
+    $('status').textContent = '已插入图片 · ' + inserted.relativePath + '（按 Ctrl+S 保存文档）';
+  } catch (error) { showError(error); }
+}
+
 async function scanExternalFiles(prompt = false) {
   if (scanning || composing || document.querySelector('dialog[open]')) return;
   scanning = true; capture(); secondary?.capture();
@@ -691,6 +757,8 @@ function updateUI() {
   $('undo').disabled = !active?.history.canUndo;
   $('redo').disabled = !active?.history.canRedo;
   const modeLabel = plainText ? '纯文本' : viewMode === 'visual' ? '可视编辑' : '源码模式';
+  $('insert-image').disabled = !active || active.kind !== 'markdown' || Boolean(active.saving)
+    || typeof window.workspaceFiles?.chooseImageAndImport !== 'function';
   $('save-file').disabled = !active || Boolean(active.saving);
   $('save-as').disabled = !active || Boolean(active.saving);
   const stateLabel = active?.saving ? '正在保存…' : active?.saveError ? `保存失败：${active.saveError}` : active?.missing ? '原文件已不存在，请另存为' : active?.externalChanged ? '磁盘文件已变化，保存前需要处理' : active && isDirty(active) ? '未保存' : active && !active.file ? '未命名' : '已保存';
@@ -758,6 +826,7 @@ function updateUI() {
     $('outline').append(note);
   }
   scheduleRecovery();
+  hydrateVisibleImages();
 }
 
 function render({ focus = true } = {}) {
@@ -876,6 +945,7 @@ $('close-discard').onclick = () => finishCloseDialog('discard');
 $('close-save').onclick = () => finishCloseDialog('save');
 $('close-confirm').addEventListener('cancel', event => { event.preventDefault(); finishCloseDialog('cancel'); });
 for (const id of ['save-file', 'save-as', 'open-file', 'new-document']) $(id).addEventListener('pointerdown', event => { capture(); secondary?.capture(); event.preventDefault(); });
+$('insert-image').onclick = () => insertLocalImage();
 $('save-file').onclick = () => saveDocument();
 $('save-as').onclick = () => saveDocument(focusedDoc(), true);
 $('open-file').onclick = openFile;
