@@ -421,9 +421,10 @@ async function saveDocument(item = focusedDoc(), saveAs = false, format = null) 
 
 // Images are always persisted by the Rust API before their Markdown reference
 // is inserted; never bypass the existing document history or save baseline.
-function commitManagedImage(item, inserted, {
+function commitManagedImages(item, insertedImages, {
   side = activePane, expectedLayout = layout, expectedText = null, sourceCaret = null,
 } = {}) {
+  if (!insertedImages?.length) return false;
   if (!item || focusedDoc() !== item || activePane !== side || layout !== expectedLayout
     || composing || secondary?.composing || item.saving) {
     throw new Error('插入期间文档、编辑区域或布局已变化；图片已保存但未插入，请返回原文档手动引用。');
@@ -447,20 +448,34 @@ function commitManagedImage(item, inserted, {
   if (current !== existing || (expectedText !== null && existing !== expectedText.replace(/\r\n?/g, '\n'))) {
     throw new Error('插入期间编辑区内容已变化，请手动补充图片引用。');
   }
-  const at = sourceCaret === null ? host.selectionStart : sourceCaret;
-  const { text, caret } = insertImageReference(
-    current, at, inserted.relativePath, item.lineEnding || '\n');
+
+  // Build the complete batch in LF offsets, then restore the document's
+  // original line ending once. All images become one Undo/Redo transaction.
+  let next = current.replace(/\r\n?/g, '\n');
+  let caret = sourceCaret === null ? host.selectionStart : sourceCaret;
+  for (const image of insertedImages) {
+    const inserted = insertImageReference(next, caret, image.relativePath, '\n');
+    next = inserted.text;
+    caret = inserted.caret;
+  }
+  const text = next.replace(/\n/g, item.lineEnding || '\n');
+  const finalCaret = next.slice(0, caret).replace(/\n/g, item.lineEnding || '\n').length;
   item.history.closeGroup();
-  if (!item.history.record(text, caret, null)) return;
+  if (!item.history.record(text, finalCaret, null)) return false;
   item.history.closeGroup();
   if (right) {
-    secondary.state.caret = caret;
+    secondary.state.caret = finalCaret;
     secondary.refresh({ force: true });
     if (item === doc()) render({ focus: false });
     else updateUI();
   } else render({ focus: false });
   scheduleRecovery();
-  $('status').textContent = '已插入图片 · ' + inserted.relativePath + '（按 Ctrl+S 保存文档）';
+  $('status').textContent = '已插入 ' + insertedImages.length + ' 张图片（按 Ctrl+S 保存文档）';
+  return true;
+}
+
+function commitManagedImage(item, inserted, options = {}) {
+  return commitManagedImages(item, [inserted], options);
 }
 
 // Issue #5: native picker imports images from the user's selected file.
