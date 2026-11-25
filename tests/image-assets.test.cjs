@@ -93,6 +93,7 @@ test('批量图片插入保留拖入顺序、原光标位置和 CRLF 偏移', as
   assert.ok(result.text.indexOf(first) < result.text.indexOf(second));
   assert.throws(() => insertImageReferences('', 0, [], '\\n'), /数量/);
   assert.throws(() => insertImageReferences('', 0, [first, ...Array(128).fill(second)]), /数量/);
+  assert.throws(() => insertImageReferences('', 0, [first], '\\r'), /换行/);
 });
 
 test('批量图片引用一次写入 DocumentHistory，撤销/重做不会拆散图片顺序', async () => {
