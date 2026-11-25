@@ -25,7 +25,7 @@
 | Markdown 引用 | URL 百分号编码的相对路径，按 UTF-8 编码含中文、空格等字符 |
 | 最大体积 | 单张图片 8 MiB；过大或空文件拒绝 |
 | 安全格式 | 仅 PNG、JPEG、GIF、WebP；拒绝 SVG、HTML、PDF 等 |
-| 导入方式 | 系统文件选择框调用 `choose_image_and_import`；未来截图可复用 `import_image_bytes` |
+| 导入方式 | 文件选择框调用 `choose_image_and_import`；剪贴板调用 `import_image_bytes`；原生拖放通过一次性 token 调用 `import_dropped_images` |
 | 显示方式 | `read_image_asset` 限制在当前 Markdown 资产目录下，前端将可信图片字节转换成 `data:` URL，不授予任意 `file://` 访问 |
 | 去重 | 暂不去重；相同图片多次插入生成两个不同 UUID 文件，永不覆盖已有文件 |
 
