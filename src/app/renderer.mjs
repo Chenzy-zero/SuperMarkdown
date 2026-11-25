@@ -309,7 +309,26 @@ async function drainOpenFiles() {
     do {
       incomingScheduled = false;
       const results = [...droppedRequests.splice(0), ...unwrap(await window.workspaceFiles.takeOpenFiles())];
-      for (const result of results) acceptExternal(result, result.side || 'left');
+      const imageGroups = new Map();
+      for (const result of results) {
+        if (!result.image) continue;
+        const position = result.dropPosition || null;
+        const key = position ? position.x + ',' + position.y : 'dom-drop';
+        if (!imageGroups.has(key)) imageGroups.set(key, { position, entries: [] });
+        imageGroups.get(key).entries.push(result);
+      }
+      // Insert all images before opening any mixed text-file drops, so opening
+      // a text file cannot steal the original Markdown insertion target.
+      for (const group of imageGroups.values()) {
+        await importDroppedImages(group.entries, group.position);
+      }
+      for (const result of results) {
+        if (result.image) continue;
+        const side = result.side || (result.dropPosition
+          ? sideAtDrop(result.dropPosition, 'left') : 'left');
+        acceptExternal(result, side);
+      }
+      lastDropTarget = null;
       if (results.length) incomingScheduled = true;
     } while (incomingScheduled && !document.querySelector('dialog[open]'));
   } catch (error) { showError(error); } finally { incomingBusy = false; }
