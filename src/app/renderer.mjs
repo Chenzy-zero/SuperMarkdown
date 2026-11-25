@@ -734,8 +734,9 @@ async function importDroppedImages(entries, position) {
     if (typeof window.workspaceFiles?.importDroppedImages !== 'function') {
       throw new Error('当前宿主不支持安全的原生图片拖入，请使用 Tauri 版本。');
     }
+    const importDocumentKey = item.file.key;
     const results = unwrap(await window.workspaceFiles.importDroppedImages({
-      documentKey: item.file.key, tokens,
+      documentKey: importDocumentKey, tokens,
     }));
     const byToken = new Map(results.map(result => [result.token, result]));
     const inserted = [], failures = [];
@@ -747,7 +748,8 @@ async function importDroppedImages(entries, position) {
       else inserted.push({ relativePath: result.relativePath });
     }
     if (focusedDoc() !== item || activePane !== side || layout !== context.layout
-      || item.history.current.markdown !== context.text || item.file?.key !== context.fileKey && context.fileKey) {
+      || item.kind !== 'markdown' || item.file?.key !== importDocumentKey
+      || item.history.current.markdown !== context.text) {
       if (inserted.length) {
         throw new Error('拖入期间已切换文档或修改正文；' + inserted.length
           + ' 张图片已安全保存到原文档资源目录，但未插入引用，请返回原文档手动引用。');
