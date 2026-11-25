@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod image_assets;
+
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, OpenOptions},
@@ -980,7 +982,9 @@ fn main() {
             startup, preferences, choose_folder, open_file, parent_folder, active_folder,
             take_open_files, open_default_apps, save_as, save, reload_encoding, inspect,
             list, read, create_markdown, entry_action, file_action, describe_link,
-            activate_link, write_recovery, read_recovery, approve_close
+            activate_link, write_recovery, read_recovery, approve_close,
+            image_assets::import_image_bytes, image_assets::choose_image_and_import,
+            image_assets::read_image_asset
         ])
         .setup(|app| {
             app.state::<WorkspaceState>().queue_paths(initial_paths());
