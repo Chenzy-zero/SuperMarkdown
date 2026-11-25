@@ -195,7 +195,7 @@ pub(crate) fn import_dropped_path(
         return Err("图片超过 8 MiB，已拒绝导入。".to_string());
     }
     let canonical = dunce::canonicalize(path).map_err(|error| error.to_string())?;
-    if canonical != path {
+    if canonical.as_path() != path {
         return Err("拖入的图片路径已变化，拒绝访问。".to_string());
     }
     let file = File::open(&canonical).map_err(|error| error.to_string())?;
