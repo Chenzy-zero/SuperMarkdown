@@ -98,3 +98,31 @@ export function renderedSelectionPrefix(root, selection) {
     return null;
   }
 }
+
+// Image insertion requires a provable source span, unlike best-effort cursor
+// restoration. Accept only text-only paragraphs / ATX headings whose complete
+// DOM block sequence exactly matches the source; refuse richer structures.
+export function visualDropCaretToSource(markdown, root, selection) {
+  if (!root || !selection?.focusNode || !root.contains(selection.focusNode)) return null;
+  const source = String(markdown).replace(/\r\n?/g, '\n');
+  const blocks = [...source.matchAll(/[^\n]+(?:\n(?![ \t]*\n)[^\n]+)*/g)];
+  const nodes = [...root.childNodes].filter(node => node.nodeType !== 3 || node.textContent.trim());
+  if (nodes.length !== blocks.length) return null;
+  let selected = null;
+  for (let index = 0; index < nodes.length; index++) {
+    const node = nodes[index], block = blocks[index];
+    const heading = /^(#{1,6}) ([^\n]*)$/.exec(block[0]);
+    const expectedTag = heading ? 'H' + heading[1].length : 'P';
+    const prefixLength = heading ? heading[1].length + 1 : 0;
+    const text = heading ? heading[2] : block[0];
+    if (node.nodeType !== 1 || node.tagName !== expectedTag
+      || [...node.childNodes].some(child => child.nodeType !== 3)
+      || node.textContent !== text) return null;
+    if (node === selection.focusNode || node.contains(selection.focusNode)) {
+      const prefix = renderedSelectionPrefix(node, selection);
+      if (prefix === null || !text.startsWith(prefix)) return null;
+      selected = block.index + prefixLength + prefix.length;
+    }
+  }
+  return selected === null ? null : sourceOffsetFromLf(String(markdown), selected);
+}
