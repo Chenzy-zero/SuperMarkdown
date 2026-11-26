@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod image_assets;
+mod html_export;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -1090,6 +1091,7 @@ fn main() {
         .manage(WorkspaceState::default())
         .manage(CloseState::default())
         .invoke_handler(tauri::generate_handler![
+            html_export::export_html, html_export::read_export_image,
             startup, preferences, choose_folder, open_file, parent_folder, active_folder,
             take_open_files, open_default_apps, save_as, save, reload_encoding, inspect,
             list, read, create_markdown, entry_action, file_action, describe_link,
