@@ -1,4 +1,5 @@
 import './tauri-bridge.mjs';
+import { buildStandaloneHtml } from './html-export.mjs';
 import { bindEncodingMenu } from './encoding-menu.mjs';
 import { bindComparison } from './comparison.mjs';
 import { bindFindPanel } from './find-panel.mjs';
@@ -1337,6 +1338,33 @@ $('parent-folder').onclick = async () => {
   catch (error) { showError(error); }
   finally { $('parent-folder').disabled = !rootFolder || /^[A-Za-z]:[\\/]?$/.test(rootFolder.path) || rootFolder.path === '/'; }
 };
+let htmlExportBusy = false;
+async function exportCurrentHtml() {
+  const item = focusedDoc();
+  if (!item || item.kind !== 'markdown' || htmlExportBusy || composing || secondary?.composing) return;
+  htmlExportBusy = true;
+  try {
+    const right = activePane === 'right';
+    const visual = (right ? secondary.mode : mode) === 'visual';
+    const host = right ? secondary.source : source;
+    const viewEngine = right ? secondary.editor : engine;
+    let markdown = item.history.current.markdown;
+    // Read a snapshot without capture(), history.record(), Save As or render().
+    if (!visual) markdown = host.value.replace(/\r?\n/g, item.lineEnding || '\n');
+    else if (right ? secondary.richDirty : richDirty) {
+      markdown = preserveUnchangedTables(markdown, preserveProtectedBlocks(markdown, viewEngine.getValue())).replace(/\r?\n/g, item.lineEnding || '\n');
+    }
+    const snapshot = { markdown, title: item.name, documentKey: item.file?.key };
+    const exported = await buildStandaloneHtml({ ...snapshot,
+      renderMarkdown: text => engine.vditor.lute.Md2HTML(text),
+      readImage: request => window.workspaceFiles.readExportImage(request), highlight: window.hljs,
+    });
+    const target = unwrap(await window.workspaceFiles.exportHtml({ name: snapshot.title, html: exported.html }));
+    $('status').textContent = target ? '已导出 HTML：' + target + (exported.warnings.length ? ' · ' + exported.warnings.join(' ') : '') : '已取消 HTML 导出。';
+  } catch (error) { showError(error); }
+  finally { htmlExportBusy = false; }
+}
+
 const captureBoth = () => { capture(); secondary?.capture(); };
 encodingMenu = bindEncodingMenu({ current: focusedDoc, capture: captureBoth, isDirty,
   convert: (item, format) => saveDocument(item, false, format),
@@ -1347,6 +1375,7 @@ workbench = bindWorkbench({ preferences: startup.preferences, setMode, setLayout
   getDocument: focusedDoc, getMode: () => activePane === 'right' ? secondary?.mode : mode,
   compareFiles: () => comparison.open(), canCompare: () => !$('compare-files').disabled,
   getLayout: () => layout, closeCurrent: () => focusedDoc() && closeDocuments([focusedDoc().key]),
+  exportHtml: exportCurrentHtml,
   findCurrent: () => findPanel?.open(), replaceCurrent: () => findPanel?.openReplace(), onError: showError });
 
 findPanel = bindFindPanel({

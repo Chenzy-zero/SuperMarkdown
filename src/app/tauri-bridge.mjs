@@ -12,6 +12,8 @@ if (!window.workspaceFiles && typeof invoke === "function") {
   };
 
   window.workspaceFiles = {
+    exportHtml: request => call("export_html", { request }),
+    readExportImage: request => call("read_export_image", { request }),
     preferences: value => call("preferences", { value }),
     parentFolder: root => call("parent_folder", { root }),
     startup: () => call("startup"),

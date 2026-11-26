@@ -26,7 +26,8 @@ async function main() {
   html = html
     .replaceAll("../../node_modules/vditor/dist/index.css", "./vendor/vditor/dist/index.css")
     .replaceAll("../../node_modules/vditor/dist/index.min.js", "./vendor/vditor/dist/index.min.js")
-    .replaceAll("../../node_modules/vditor/dist/js/icons/ant.js", "./vendor/vditor/dist/js/icons/ant.js");
+    .replaceAll("../../node_modules/vditor/dist/js/icons/ant.js", "./vendor/vditor/dist/js/icons/ant.js")
+    .replaceAll("../../node_modules/vditor/dist/js/highlight.js/highlight.min.js", "./vendor/vditor/dist/js/highlight.js/highlight.min.js");
   html = html.replace("connect-src 'none'", "connect-src 'self' ipc: http://ipc.localhost");
   await fs.writeFile(indexPath, html, "utf8");
 
